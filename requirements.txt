@@ -1,0 +1,24 @@
+# PyTorch ecosystem
+torch
+torchvision
+torchaudio
+
+# Transformers and model libraries
+transformers
+accelerate
+huggingface-hub
+
+# Computer Vision
+ultralytics
+opencv-python-headless
+pillow
+
+# Video processing
+pytorchvideo
+decord
+av
+
+# Data processing
+pandas
+numpy
+
