@@ -1046,8 +1046,38 @@ class PyTorchVideoModel(EpisodicMemoryModel):
         
         # Extract features
         with torch.no_grad():
+            # For SlowFast models, prepare dual-pathway inputs
+            if self.video_model_name == "slowfast":
+                # SlowFast expects a list of two tensors: [slow_pathway, fast_pathway]
+                # Slow pathway: 1/8 temporal rate (alpha = 8)
+                # Fast pathway: full temporal rate (alpha = 1)
+                
+                # Get temporal dimension - video_tensor should be (B, C, T, H, W)
+                if len(video_tensor.shape) == 5:
+                    B, C, T, H, W = video_tensor.shape
+                    
+                    # Create slow pathway: sample every 8th frame
+                    # Ensure we have at least one frame
+                    slow_indices = torch.arange(0, T, 8, device=self.device)
+                    if len(slow_indices) == 0:
+                        slow_indices = torch.tensor([0], device=self.device)
+                    slow_pathway = video_tensor[:, :, slow_indices, :, :]
+                    
+                    # Fast pathway: use all frames
+                    fast_pathway = video_tensor
+                    
+                    # Pass as list to model
+                    model_input = [slow_pathway, fast_pathway]
+                else:
+                    # Fallback: if shape is unexpected, try with single tensor wrapped in list
+                    # This shouldn't happen but provides a fallback
+                    model_input = [video_tensor, video_tensor]
+            else:
+                # For MViT and other models, use single tensor
+                model_input = video_tensor
+            
             # PyTorchVideo models return features/logits
-            output = self.pytorchvideo_model(video_tensor)
+            output = self.pytorchvideo_model(model_input)
             
             # Handle different output formats
             if isinstance(output, tuple):
