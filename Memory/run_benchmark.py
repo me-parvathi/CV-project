@@ -3,7 +3,7 @@
 import torch
 from pathlib import Path
 from data_processing import MECCANOLoader, DatasetLoader
-from models import MomentRetrievalModel, CLIPModel, FAISSIndex, EpisodicMemoryModel
+from models import MomentRetrievalModel, CLIPModel, FAISSIndex, MMAction2Model, EpisodicMemoryModel
 from benchmark import BenchmarkRunner
 import time
 
@@ -20,7 +20,8 @@ def main():
     model_candidates = {
         "Moment-DETR": MomentRetrievalModel(device=device),
         "CLIP": CLIPModel(device=device),
-        "FAISS": FAISSIndex(device=device)
+        "FAISS": FAISSIndex(device=device),
+        "MMAction2": MMAction2Model(device=device)
     }
     
     models = {}
