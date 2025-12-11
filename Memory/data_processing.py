@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 import json
+import re
 import pandas as pd
 import cv2
 
@@ -291,10 +292,34 @@ class MECCANOLoader(DatasetLoader):
         """
         temporal = {}
         
+        # Helper function to extract frame number from string (handles filenames like '00010.jpg')
+        def _extract_frame_number(value):
+            """Extract numeric frame number from string, handling filenames."""
+            if isinstance(value, (int, float)):
+                return int(value)
+            value_str = str(value).strip()
+            # If it's a filename, extract the numeric part before the extension
+            if '.' in value_str:
+                # Remove file extension and extract numeric part
+                stem = Path(value_str).stem
+                # Extract digits from the stem
+                match = re.search(r'\d+', stem)
+                if match:
+                    return int(match.group())
+            # Try direct conversion
+            try:
+                return int(value_str)
+            except ValueError:
+                # If it's a float string, convert to int
+                try:
+                    return int(float(value_str))
+                except ValueError:
+                    raise ValueError(f"Cannot convert '{value}' to frame number")
+        
         # Try frame-based
         if 'start_frame' in annotation and 'end_frame' in annotation:
-            temporal['start_frame'] = int(annotation['start_frame'])
-            temporal['end_frame'] = int(annotation['end_frame'])
+            temporal['start_frame'] = _extract_frame_number(annotation['start_frame'])
+            temporal['end_frame'] = _extract_frame_number(annotation['end_frame'])
             temporal['type'] = 'frames'
         # Try time-based
         elif 'start_time' in annotation and 'end_time' in annotation:
@@ -315,6 +340,22 @@ class MECCANOLoader(DatasetLoader):
                     temporal['start_time'] = float(start)
                     temporal['end_time'] = float(end)
                     temporal['type'] = 'time'
+            else:
+                # Try to extract frame numbers from strings
+                try:
+                    start_frame = _extract_frame_number(start)
+                    end_frame = _extract_frame_number(end)
+                    temporal['start_frame'] = start_frame
+                    temporal['end_frame'] = end_frame
+                    temporal['type'] = 'frames'
+                except (ValueError, TypeError):
+                    # If extraction fails, try as time
+                    try:
+                        temporal['start_time'] = float(start)
+                        temporal['end_time'] = float(end)
+                        temporal['type'] = 'time'
+                    except (ValueError, TypeError):
+                        pass
         # Try temporal_segment
         elif 'temporal_segment' in annotation:
             segment = annotation['temporal_segment']

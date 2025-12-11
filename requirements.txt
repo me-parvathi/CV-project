@@ -4,7 +4,7 @@ torchvision
 torchaudio
 
 # Transformers and model libraries
-transformers
+transformers  # Includes Moment-DETR and CLIP models
 accelerate
 huggingface-hub
 
@@ -22,6 +22,9 @@ av
 pandas
 numpy
 psutil
+
+# Similarity search (for Memory/FAISS model)
+faiss-cpu
 
 
 
