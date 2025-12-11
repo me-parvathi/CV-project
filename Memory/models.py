@@ -866,11 +866,13 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             raise ValueError(f"Unsupported model_name: {model_name}. Use 'slowfast' or 'mvit'")
         
         try:
-            import pytorchvideo.models as pv_models
+            import torch
             from transformers import CLIPProcessor, CLIPModel as HFCLIPModel
             
-            # Load PyTorchVideo model
-            self.pytorchvideo_model = pv_models.__dict__[self.pytorchvideo_model_name](
+            # Load PyTorchVideo model using torch.hub
+            self.pytorchvideo_model = torch.hub.load(
+                'facebookresearch/pytorchvideo',
+                self.pytorchvideo_model_name,
                 pretrained=True
             ).to(device)
             self.pytorchvideo_model.eval()
