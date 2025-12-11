@@ -36,7 +36,7 @@ def main():
     print(f"\n{len(models)} model(s) ready for benchmarking")
     
     # Load dataset
-    dataset_path = "data/videos"  # Update this path to your UCF101 dataset
+    dataset_path = "/home/pb3071/videos/UCF-101"  # Update this path to your UCF101 dataset
     loader: DatasetLoader = UCF101Loader(dataset_path)
     videos = loader.load_videos()
     

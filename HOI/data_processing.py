@@ -44,7 +44,7 @@ class UCF101Loader(DatasetLoader):
         
         for action_dir in self.dataset_path.iterdir():
             if action_dir.is_dir():
-                for video_file in action_dir.glob("*.mp4"):
+                for video_file in action_dir.glob("*.avi"):
                     if video_file.exists() and video_file.is_file():
                         video_dict = {
                             "video_path": str(video_file),
