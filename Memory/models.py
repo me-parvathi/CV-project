@@ -1106,10 +1106,39 @@ class PyTorchVideoModel(EpisodicMemoryModel):
                 # Flatten if still not 2D
                 features = features.view(features.size(0), -1)
             
+            # CRITICAL FIX: Ensure consistent feature size by using global average pooling
+            # Flatten completely to 1D feature vector
+            features = features.view(features.size(0), -1)
+            
+            # Use adaptive pooling to get fixed-size features (512 dimensions)
+            # This ensures all segments produce the same feature size regardless of input
+            target_size = 512
+            current_size = features.shape[1]
+            
+            if current_size > target_size:
+                # If features are too large, use mean pooling in chunks
+                chunk_size = current_size // target_size
+                remainder = current_size % target_size
+                if remainder > 0:
+                    # Pad to make current_size divisible by target_size
+                    pad_size = target_size - remainder
+                    padding = torch.zeros(features.size(0), pad_size, 
+                                         device=features.device, dtype=features.dtype)
+                    features = torch.cat([features, padding], dim=1)
+                    current_size = features.shape[1]
+                    chunk_size = current_size // target_size
+                # Reshape and average pool: (batch, target_size, chunk_size) -> (batch, target_size)
+                features = features.view(features.size(0), target_size, chunk_size).mean(dim=-1)
+            elif current_size < target_size:
+                # If features are too small, pad with zeros
+                padding = torch.zeros(features.size(0), target_size - current_size, 
+                                    device=features.device, dtype=features.dtype)
+                features = torch.cat([features, padding], dim=1)
+            
             # Normalize features
             features = features / (features.norm(dim=-1, keepdim=True) + 1e-8)
         
-        return features.squeeze(0)  # Remove batch dimension
+        return features.squeeze(0)  # Remove batch dimension -> (features,)
     
     def retrieve_moments(self, video_path: str, query: str, top_k: int = 5) -> List[Dict]:
         """Retrieve moments using PyTorchVideo features and CLIP text matching."""
@@ -1153,8 +1182,34 @@ class PyTorchVideoModel(EpisodicMemoryModel):
         if len(segment_features) == 0:
             return []
         
+        # CRITICAL FIX: Ensure all features have the same shape before stacking
+        # Normalize all features to the same size (in case some segments failed normalization)
+        normalized_features = []
+        target_size = 512  # Should match the target_size in _extract_video_features
+        
+        for feat in segment_features:
+            # Ensure feature is 1D
+            if len(feat.shape) > 1:
+                feat = feat.view(-1)
+            elif len(feat.shape) == 0:
+                feat = feat.unsqueeze(0)
+            
+            current_size = feat.shape[0]
+            
+            # Pad or truncate to target_size
+            if current_size < target_size:
+                # Pad with zeros
+                padding = torch.zeros(target_size - current_size, 
+                                    device=feat.device, dtype=feat.dtype)
+                feat = torch.cat([feat, padding])
+            elif current_size > target_size:
+                # Truncate (shouldn't happen if _extract_video_features works correctly)
+                feat = feat[:target_size]
+            
+            normalized_features.append(feat)
+        
         # Stack features and compute similarities
-        segment_features_tensor = torch.stack(segment_features).to(self.device)
+        segment_features_tensor = torch.stack(normalized_features).to(self.device)
         similarities = (segment_features_tensor @ query_embedding.T).squeeze().cpu().numpy()
         
         # Convert to moments
