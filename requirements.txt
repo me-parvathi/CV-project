@@ -21,4 +21,7 @@ av
 # Data processing
 pandas
 numpy
+psutil
+
+
 
