@@ -50,7 +50,12 @@ class BenchmarkRunner:
         return memory_info
     
     def _extract_avg_confidence(self, result: Dict) -> Optional[float]:
-        """Extract average confidence from model results."""
+        """
+        Extract average confidence from model results.
+        
+        Note: Text-based models (LLaVA, Qwen2-VL) don't provide numeric confidence
+        scores, so this will return None for those models. This is expected behavior.
+        """
         confidences = []
         
         # Extract object confidences
@@ -82,19 +87,58 @@ class BenchmarkRunner:
         
         # Action accuracy (if ground truth has action)
         if "action" in ground_truth and "structured_output" in result:
-            predicted_action = result["structured_output"].get("primary_action", "")
-            gt_action = ground_truth["action"]
-            metrics["action_correct"] = predicted_action.lower() == gt_action.lower()
+            so = result["structured_output"]
+            gt_action = ground_truth["action"].lower()
+            
+            # Try different field names for action prediction
+            predicted_action_text = ""
+            if "primary_action" in so:
+                predicted_action_text = str(so["primary_action"]).lower()
+            elif "action_description" in so:
+                predicted_action_text = str(so["action_description"]).lower()
+            elif "action_detected" in so:
+                predicted_action_text = str(so["action_detected"]).lower()
+            
+            # For text-based models, do fuzzy matching (check if GT action appears in description)
+            if predicted_action_text:
+                # Exact match
+                exact_match = predicted_action_text == gt_action
+                # Fuzzy match: check if ground truth action name appears in the description
+                fuzzy_match = gt_action in predicted_action_text or predicted_action_text in gt_action
+                metrics["action_correct"] = exact_match or fuzzy_match
         
         # Object detection accuracy (if ground truth has objects)
-        if "objects" in ground_truth and "objects_detected" in result:
-            predicted_objects = {obj.get("class", "").lower() for obj in result["objects_detected"]}
+        if "objects" in ground_truth:
             gt_objects = {obj.lower() for obj in ground_truth["objects"]} if isinstance(ground_truth["objects"], list) else set()
+            
             if gt_objects:
-                intersection = predicted_objects & gt_objects
-                metrics["object_precision"] = len(intersection) / len(predicted_objects) if predicted_objects else 0.0
-                metrics["object_recall"] = len(intersection) / len(gt_objects) if gt_objects else 0.0
-                metrics["object_f1"] = 2 * metrics["object_precision"] * metrics["object_recall"] / (metrics["object_precision"] + metrics["object_recall"]) if (metrics["object_precision"] + metrics["object_recall"]) > 0 else 0.0
+                predicted_objects = set()
+                
+                # For structured detection (YOLO-style)
+                if "objects_detected" in result and isinstance(result["objects_detected"], list):
+                    predicted_objects = {obj.get("class", "").lower() for obj in result["objects_detected"] if isinstance(obj, dict)}
+                
+                # For text-based descriptions (LLaVA, Qwen2-VL)
+                elif "structured_output" in result:
+                    so = result["structured_output"]
+                    objects_text = ""
+                    if "objects_mentioned" in so:
+                        objects_text = str(so["objects_mentioned"]).lower()
+                    elif "objects_detected" in so:
+                        objects_text = str(so["objects_detected"]).lower()
+                    
+                    # Extract object names from text by checking if GT objects are mentioned
+                    # This is a simple heuristic - could be improved with NLP
+                    if objects_text:
+                        for gt_obj in gt_objects:
+                            if gt_obj in objects_text or any(word in objects_text for word in gt_obj.split()):
+                                predicted_objects.add(gt_obj)
+                
+                if predicted_objects or gt_objects:
+                    intersection = predicted_objects & gt_objects
+                    metrics["object_precision"] = len(intersection) / len(predicted_objects) if predicted_objects else 0.0
+                    metrics["object_recall"] = len(intersection) / len(gt_objects) if gt_objects else 0.0
+                    metrics["object_f1"] = 2 * metrics["object_precision"] * metrics["object_recall"] / (metrics["object_precision"] + metrics["object_recall"]) if (metrics["object_precision"] + metrics["object_recall"]) > 0 else 0.0
         
         return metrics if metrics else None
     
