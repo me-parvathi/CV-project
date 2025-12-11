@@ -3,7 +3,7 @@
 import torch
 from pathlib import Path
 from data_processing import MECCANOLoader, DatasetLoader
-from models import MomentRetrievalModel, CLIPModel, FAISSIndex, MMAction2Model, EpisodicMemoryModel
+from models import MomentRetrievalModel, CLIPModel, FAISSIndex, MMAction2Model, PyTorchVideoModel, EpisodicMemoryModel
 from benchmark import BenchmarkRunner
 import time
 
@@ -21,7 +21,9 @@ def main():
         "Moment-DETR": MomentRetrievalModel(device=device),
         "CLIP": CLIPModel(device=device),
         "FAISS": FAISSIndex(device=device),
-        "MMAction2": MMAction2Model(device=device)
+        "MMAction2": MMAction2Model(device=device),
+        "PyTorchVideo-SlowFast": PyTorchVideoModel(device=device, model_name="slowfast"),
+        "PyTorchVideo-MViT": PyTorchVideoModel(device=device, model_name="mvit")
     }
     
     models = {}

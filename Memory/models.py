@@ -841,3 +841,270 @@ class MMAction2Model(EpisodicMemoryModel):
             print(f"Error in MMAction2 retrieval: {e}")
             return []
 
+
+class PyTorchVideoModel(EpisodicMemoryModel):
+    """PyTorchVideo model (SlowFast/MViT) for video-text retrieval."""
+    
+    def __init__(self, device: str = "cuda", model_name: str = "slowfast"):
+        """
+        Initialize PyTorchVideo model.
+        
+        Args:
+            device: Device to run model on ('cuda' or 'cpu').
+            model_name: Model variant - 'slowfast' or 'mvit' (default: 'slowfast').
+        """
+        self.device = device
+        self.video_model_name = model_name.lower()
+        
+        if self.video_model_name == "slowfast":
+            self.model_name = "PyTorchVideo-SlowFast"
+            self.pytorchvideo_model_name = "slowfast_r50"
+        elif self.video_model_name == "mvit":
+            self.model_name = "PyTorchVideo-MViT"
+            self.pytorchvideo_model_name = "mvit_base_16x4"
+        else:
+            raise ValueError(f"Unsupported model_name: {model_name}. Use 'slowfast' or 'mvit'")
+        
+        try:
+            import pytorchvideo.models as pv_models
+            from transformers import CLIPProcessor, CLIPModel as HFCLIPModel
+            
+            # Load PyTorchVideo model
+            self.pytorchvideo_model = pv_models.__dict__[self.pytorchvideo_model_name](
+                pretrained=True
+            ).to(device)
+            self.pytorchvideo_model.eval()
+            
+            # Store transforms for later use
+            self.pytorchvideo_transforms = None
+            self._prepare_transforms()
+            
+            # Load CLIP for text encoding and similarity computation
+            clip_model_name = "openai/clip-vit-base-patch32"
+            self.clip_processor = CLIPProcessor.from_pretrained(clip_model_name)
+            self.clip_model = HFCLIPModel.from_pretrained(clip_model_name).to(device)
+            self.clip_model.eval()
+            
+            self.available = True
+        except ImportError as e:
+            self.available = False
+            self.error = f"Required libraries not available: {e}"
+        except Exception as e:
+            self.available = False
+            self.error = str(e)
+    
+    def _prepare_transforms(self):
+        """Prepare PyTorchVideo transforms for preprocessing."""
+        from pytorchvideo.transforms import (
+            ApplyTransformToKey,
+            Normalize,
+            ShortSideScale,
+            UniformTemporalSubsample,
+        )
+        from torchvision.transforms import Compose, Lambda
+        
+        # PyTorchVideo models expect specific input format
+        # For SlowFast: expects dict with "video" key containing tensor
+        # For MViT: similar format
+        
+        mean = [0.45, 0.45, 0.45]
+        std = [0.225, 0.225, 0.225]
+        
+        if self.video_model_name == "slowfast":
+            # SlowFast specific transforms
+            self.pytorchvideo_transforms = Compose([
+                ApplyTransformToKey(
+                    key="video",
+                    transform=Compose([
+                        UniformTemporalSubsample(8),  # Sample 8 frames
+                        Lambda(lambda x: x / 255.0),  # Normalize to [0, 1]
+                        Normalize(mean, std),
+                        ShortSideScale(size=256),
+                        Lambda(lambda x: x.permute(1, 0, 2, 3)),  # (C, T, H, W)
+                    ]),
+                ),
+            ])
+        else:  # mvit
+            # MViT specific transforms
+            self.pytorchvideo_transforms = Compose([
+                ApplyTransformToKey(
+                    key="video",
+                    transform=Compose([
+                        UniformTemporalSubsample(16),  # Sample 16 frames
+                        Lambda(lambda x: x / 255.0),  # Normalize to [0, 1]
+                        Normalize(mean, std),
+                        ShortSideScale(size=224),
+                    ]),
+                ),
+            ])
+    
+    def get_model_name(self) -> str:
+        return self.model_name
+    
+    def _extract_frames(self, video_path: str, num_frames: int = 32) -> Tuple[List[np.ndarray], float, int]:
+        """Extract frames from video and return metadata."""
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return [], 30.0, 0
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        
+        if total_frames == 0:
+            cap.release()
+            return [], fps, 0
+        
+        # Sample frames uniformly
+        frame_indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+        frames = []
+        
+        for idx in frame_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if ret:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frames.append(frame_rgb)
+        
+        cap.release()
+        return frames, fps, total_frames
+    
+    def _extract_video_features(self, frames: List[np.ndarray]) -> torch.Tensor:
+        """Extract video features using PyTorchVideo model."""
+        # Convert frames to tensor format expected by PyTorchVideo
+        # Frames should be in shape (T, H, W, C) -> (T, C, H, W)
+        frame_tensors = []
+        for frame in frames:
+            # Convert numpy array to tensor and normalize
+            frame_tensor = torch.from_numpy(frame).permute(2, 0, 1).float()  # (C, H, W)
+            frame_tensors.append(frame_tensor)
+        
+        # Stack frames: (T, C, H, W)
+        video_tensor = torch.stack(frame_tensors)
+        
+        # Apply transforms if available
+        if self.pytorchvideo_transforms:
+            try:
+                # PyTorchVideo expects dict with "video" key
+                video_dict = {"video": video_tensor}
+                video_dict = self.pytorchvideo_transforms(video_dict)
+                video_tensor = video_dict["video"]
+            except Exception as e:
+                # If transforms fail, use basic preprocessing
+                video_tensor = video_tensor / 255.0
+                if len(video_tensor.shape) == 4:
+                    video_tensor = video_tensor.permute(1, 0, 2, 3)  # (C, T, H, W)
+        
+        # Ensure correct format: (C, T, H, W) or (1, C, T, H, W)
+        if len(video_tensor.shape) == 4:
+            # Assume (C, T, H, W), add batch dimension
+            video_tensor = video_tensor.unsqueeze(0)
+        elif len(video_tensor.shape) == 3:
+            # Assume (T, C, H, W), rearrange and add batch
+            video_tensor = video_tensor.permute(1, 0, 2, 3).unsqueeze(0)
+        
+        video_tensor = video_tensor.to(self.device)
+        
+        # Extract features
+        with torch.no_grad():
+            # PyTorchVideo models return features/logits
+            output = self.pytorchvideo_model(video_tensor)
+            
+            # Handle different output formats
+            if isinstance(output, tuple):
+                features = output[0]  # Usually first element is features
+            elif isinstance(output, dict):
+                # Some models return dict with 'features' or 'logits' key
+                features = output.get('features', output.get('logits', output.get('x', None)))
+                if features is None:
+                    features = list(output.values())[0]
+            else:
+                features = output
+            
+            # Extract features before classification head if possible
+            # Try to access intermediate features by checking model structure
+            if hasattr(self.pytorchvideo_model, 'blocks'):
+                # For transformer-based models (like MViT), we can extract from blocks
+                # For now, use the output and normalize
+                pass
+            
+            # Ensure features are 2D: (batch, features)
+            while len(features.shape) > 2:
+                # Average pool over remaining dimensions
+                features = features.mean(dim=-1)
+            
+            if len(features.shape) > 2:
+                # Flatten if still not 2D
+                features = features.view(features.size(0), -1)
+            
+            # Normalize features
+            features = features / (features.norm(dim=-1, keepdim=True) + 1e-8)
+        
+        return features.squeeze(0)  # Remove batch dimension
+    
+    def retrieve_moments(self, video_path: str, query: str, top_k: int = 5) -> List[Dict]:
+        """Retrieve moments using PyTorchVideo features and CLIP text matching."""
+        if not self.available:
+            raise RuntimeError(f"PyTorchVideo model unavailable: {self.error}")
+        
+        if not Path(video_path).exists():
+            return []
+        
+        # Extract frames
+        frames, fps, total_frames = self._extract_frames(video_path, num_frames=32)
+        if len(frames) == 0:
+            return []
+        
+        duration = total_frames / fps if fps > 0 else len(frames) / 30.0
+        
+        # Encode query using CLIP
+        query_inputs = self.clip_processor(text=[query], return_tensors="pt", padding=True).to(self.device)
+        with torch.no_grad():
+            query_embedding = self.clip_model.get_text_features(**query_inputs)
+            query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
+        
+        # Extract video features for frame segments using sliding window
+        window_size = max(8, len(frames) // 4)  # Adaptive window size
+        stride = max(1, window_size // 2)
+        
+        segment_features = []
+        segment_indices = []
+        
+        for i in range(0, len(frames) - window_size + 1, stride):
+            segment_frames = frames[i:i+window_size]
+            try:
+                segment_feature = self._extract_video_features(segment_frames)
+                segment_features.append(segment_feature)
+                segment_indices.append((i, min(i + window_size, len(frames))))
+            except Exception as e:
+                # Skip segment if feature extraction fails
+                print(f"Warning: Failed to extract features for segment {i}: {e}")
+                continue
+        
+        if len(segment_features) == 0:
+            return []
+        
+        # Stack features and compute similarities
+        segment_features_tensor = torch.stack(segment_features).to(self.device)
+        similarities = (segment_features_tensor @ query_embedding.T).squeeze().cpu().numpy()
+        
+        # Convert to moments
+        moments = []
+        for (start_idx, end_idx), score in zip(segment_indices, similarities):
+            start_frame = int((start_idx / len(frames)) * total_frames)
+            end_frame = int((end_idx / len(frames)) * total_frames)
+            start_time = start_frame / fps if fps > 0 else (start_idx / len(frames)) * duration
+            end_time = end_frame / fps if fps > 0 else (end_idx / len(frames)) * duration
+            
+            moments.append({
+                "start_time": float(start_time),
+                "end_time": float(end_time),
+                "start_frame": start_frame,
+                "end_frame": end_frame,
+                "score": float(score),
+                "model_name": self.model_name
+            })
+        
+        # Sort by score and return top_k
+        moments.sort(key=lambda x: x["score"], reverse=True)
+        return moments[:top_k]
+
