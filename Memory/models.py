@@ -600,8 +600,19 @@ class MMAction2Model(EpisodicMemoryModel):
             if mode == "temporal_localization":
                 # Use BMN for temporal localization
                 if config_file is None:
-                    # Default BMN config (user should provide or we'll use a fallback)
-                    config_file = "configs/localization/bmn/bmn_2xb8-400x100-9e_activitynet-feature.py"
+                    # Try to find config in mmaction package
+                    try:
+                        import mmaction
+                        mmaction_dir = Path(mmaction.__file__).parent.parent
+                        default_config = mmaction_dir / "configs" / "localization" / "bmn" / "bmn_2xb8-400x100-9e_activitynet-feature.py"
+                        if default_config.exists():
+                            config_file = str(default_config)
+                        else:
+                            # Fallback to relative path
+                            config_file = "configs/localization/bmn/bmn_2xb8-400x100-9e_activitynet-feature.py"
+                    except Exception:
+                        config_file = "configs/localization/bmn/bmn_2xb8-400x100-9e_activitynet-feature.py"
+                
                 if checkpoint_file is None:
                     checkpoint_file = "https://download.openmmlab.com/mmaction/v1.0/localization/bmn/bmn_2xb8-400x100-9e_activitynet-feature/bmn_2xb8-400x100-9e_activitynet-feature_20220927-095211.pth"
                 
@@ -615,7 +626,16 @@ class MMAction2Model(EpisodicMemoryModel):
                     self.model_name_str = "tsn"
                     self.model_name = "MMAction2-TSN"
                     # Try to load TSN as fallback
-                    config_file = "configs/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
+                    try:
+                        import mmaction
+                        mmaction_dir = Path(mmaction.__file__).parent.parent
+                        default_config = mmaction_dir / "configs" / "recognition" / "tsn" / "tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
+                        if default_config.exists():
+                            config_file = str(default_config)
+                        else:
+                            config_file = "configs/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
+                    except Exception:
+                        config_file = "configs/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
                     checkpoint_file = "https://download.openmmlab.com/mmaction/v1.0/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb_20220906-2692d16c.pth"
                     try:
                         self.model = init_recognizer(config_file, checkpoint_file, device=device)
@@ -628,12 +648,30 @@ class MMAction2Model(EpisodicMemoryModel):
                 # Use TSN or SlowFast for action recognition
                 if model_name == "slowfast":
                     if config_file is None:
-                        config_file = "configs/recognition/slowfast/slowfast_r50_8x8x1_256e_kinetics400_rgb.py"
+                        try:
+                            import mmaction
+                            mmaction_dir = Path(mmaction.__file__).parent.parent
+                            default_config = mmaction_dir / "configs" / "recognition" / "slowfast" / "slowfast_r50_8x8x1_256e_kinetics400_rgb.py"
+                            if default_config.exists():
+                                config_file = str(default_config)
+                            else:
+                                config_file = "configs/recognition/slowfast/slowfast_r50_8x8x1_256e_kinetics400_rgb.py"
+                        except Exception:
+                            config_file = "configs/recognition/slowfast/slowfast_r50_8x8x1_256e_kinetics400_rgb.py"
                     if checkpoint_file is None:
                         checkpoint_file = "https://download.openmmlab.com/mmaction/v1.0/recognition/slowfast/slowfast_r50_8x8x1_256e_kinetics400_rgb/slowfast_r50_8x8x1_256e_kinetics400_rgb_20200704-73547d2b.pth"
                 else:  # Default to TSN
                     if config_file is None:
-                        config_file = "configs/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
+                        try:
+                            import mmaction
+                            mmaction_dir = Path(mmaction.__file__).parent.parent
+                            default_config = mmaction_dir / "configs" / "recognition" / "tsn" / "tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
+                            if default_config.exists():
+                                config_file = str(default_config)
+                            else:
+                                config_file = "configs/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
+                        except Exception:
+                            config_file = "configs/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
                     if checkpoint_file is None:
                         checkpoint_file = "https://download.openmmlab.com/mmaction/v1.0/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb_20220906-2692d16c.pth"
                 
