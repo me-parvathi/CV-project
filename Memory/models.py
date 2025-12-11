@@ -550,3 +550,294 @@ class FAISSIndex(EpisodicMemoryModel):
         moments.sort(key=lambda x: x["score"], reverse=True)
         return moments[:top_k]
 
+
+class MMAction2Model(EpisodicMemoryModel):
+    """MMAction2 model for video understanding (action recognition and temporal localization)."""
+    
+    def __init__(self, device: str = "cuda", mode: str = "temporal_localization", 
+                 model_name: Optional[str] = None, config_file: Optional[str] = None,
+                 checkpoint_file: Optional[str] = None):
+        """
+        Initialize MMAction2 model.
+        
+        Args:
+            device: Device to run model on ('cuda' or 'cpu').
+            mode: Operation mode - 'temporal_localization' (BMN) or 'action_recognition' (TSN/SlowFast).
+            model_name: Specific model name (e.g., 'bmn', 'tsn', 'slowfast'). If None, uses default for mode.
+            config_file: Path to config file. If None, uses default.
+            checkpoint_file: Path to checkpoint file. If None, downloads from model zoo.
+        """
+        self.device = device
+        self.mode = mode
+        self.model_name_str = model_name or ("bmn" if mode == "temporal_localization" else "tsn")
+        self.model_name = f"MMAction2-{self.model_name_str.upper()}"
+        
+        try:
+            from mmaction.apis import init_recognizer, inference_recognizer
+            
+            self.init_recognizer = init_recognizer
+            self.inference_recognizer = inference_recognizer
+            
+            # Try to import temporal action detector (may not be available in all versions)
+            try:
+                from mmaction.apis import inference_temporal_action_detector
+                self.inference_temporal_action_detector = inference_temporal_action_detector
+                self.has_temporal_detector = True
+            except ImportError:
+                # Temporal action detector not available, will use action recognition fallback
+                self.inference_temporal_action_detector = None
+                self.has_temporal_detector = False
+            
+            self.mmaction_available = True
+        except ImportError as e:
+            self.available = False
+            self.error = f"MMAction2 not available: {e}"
+            self.mmaction_available = False
+            return
+        
+        try:
+            # Initialize model based on mode
+            if mode == "temporal_localization":
+                # Use BMN for temporal localization
+                if config_file is None:
+                    # Default BMN config (user should provide or we'll use a fallback)
+                    config_file = "configs/localization/bmn/bmn_2xb8-400x100-9e_activitynet-feature.py"
+                if checkpoint_file is None:
+                    checkpoint_file = "https://download.openmmlab.com/mmaction/v1.0/localization/bmn/bmn_2xb8-400x100-9e_activitynet-feature/bmn_2xb8-400x100-9e_activitynet-feature_20220927-095211.pth"
+                
+                try:
+                    self.model = init_recognizer(config_file, checkpoint_file, device=device)
+                    self.available = True
+                except Exception as e:
+                    print(f"Warning: Could not load BMN model: {e}")
+                    print("Falling back to action recognition mode...")
+                    self.mode = "action_recognition"
+                    self.model_name_str = "tsn"
+                    self.model_name = "MMAction2-TSN"
+                    # Try to load TSN as fallback
+                    config_file = "configs/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
+                    checkpoint_file = "https://download.openmmlab.com/mmaction/v1.0/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb_20220906-2692d16c.pth"
+                    try:
+                        self.model = init_recognizer(config_file, checkpoint_file, device=device)
+                        self.available = True
+                    except Exception as e2:
+                        self.available = False
+                        self.error = f"Could not load any MMAction2 model: {e2}"
+            
+            elif mode == "action_recognition":
+                # Use TSN or SlowFast for action recognition
+                if model_name == "slowfast":
+                    if config_file is None:
+                        config_file = "configs/recognition/slowfast/slowfast_r50_8x8x1_256e_kinetics400_rgb.py"
+                    if checkpoint_file is None:
+                        checkpoint_file = "https://download.openmmlab.com/mmaction/v1.0/recognition/slowfast/slowfast_r50_8x8x1_256e_kinetics400_rgb/slowfast_r50_8x8x1_256e_kinetics400_rgb_20200704-73547d2b.pth"
+                else:  # Default to TSN
+                    if config_file is None:
+                        config_file = "configs/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb.py"
+                    if checkpoint_file is None:
+                        checkpoint_file = "https://download.openmmlab.com/mmaction/v1.0/recognition/tsn/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb/tsn_imagenet-pretrained-r50_8xb32-1x1x8-100e_kinetics400-rgb_20220906-2692d16c.pth"
+                
+                try:
+                    self.model = init_recognizer(config_file, checkpoint_file, device=device)
+                    self.available = True
+                except Exception as e:
+                    self.available = False
+                    self.error = f"Could not load action recognition model: {e}"
+            
+            if self.available:
+                self.model.eval()
+        
+        except Exception as e:
+            self.available = False
+            self.error = f"Error initializing MMAction2 model: {e}"
+    
+    def get_model_name(self) -> str:
+        return self.model_name
+    
+    def _extract_frames(self, video_path: str, num_frames: int = 32) -> Tuple[List[np.ndarray], float, int]:
+        """Extract frames from video and return metadata."""
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            return [], 30.0, 0
+        
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        
+        if total_frames == 0:
+            cap.release()
+            return [], fps, 0
+        
+        # Sample frames uniformly
+        frame_indices = np.linspace(0, total_frames - 1, num_frames, dtype=int)
+        frames = []
+        
+        for idx in frame_indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ret, frame = cap.read()
+            if ret:
+                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                frames.append(frame_rgb)
+        
+        cap.release()
+        return frames, fps, total_frames
+    
+    def _query_to_action_keywords(self, query: str) -> List[str]:
+        """Extract action keywords from text query for matching with action classes."""
+        # Simple keyword extraction - can be enhanced with NLP
+        query_lower = query.lower()
+        
+        # Common action keywords
+        action_keywords = []
+        common_actions = [
+            'pick', 'place', 'grab', 'put', 'move', 'hold', 'lift', 'drop',
+            'open', 'close', 'push', 'pull', 'turn', 'rotate', 'press',
+            'cut', 'slice', 'chop', 'pour', 'pour', 'mix', 'stir',
+            'walk', 'run', 'sit', 'stand', 'jump', 'climb',
+            'throw', 'catch', 'kick', 'hit', 'swing'
+        ]
+        
+        for action in common_actions:
+            if action in query_lower:
+                action_keywords.append(action)
+        
+        return action_keywords if action_keywords else [query_lower]
+    
+    def _temporal_localization_retrieval(self, video_path: str, query: str, top_k: int = 5) -> List[Dict]:
+        """Retrieve moments using temporal action localization (BMN)."""
+        try:
+            # For BMN, we need to use temporal action detection API
+            # Note: BMN typically works with pre-extracted features, but we'll try with video
+            if not self.has_temporal_detector or self.inference_temporal_action_detector is None:
+                # Fallback to action recognition if temporal detector not available
+                return self._action_recognition_retrieval(video_path, query, top_k)
+            
+            results = self.inference_temporal_action_detector(self.model, video_path)
+            
+            moments = []
+            cap = cv2.VideoCapture(video_path)
+            fps = cap.get(cv2.CAP_PROP_FPS) if cap.isOpened() else 30.0
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if cap.isOpened() else 0
+            if cap.isOpened():
+                cap.release()
+            
+            # Parse results - format depends on model output
+            if isinstance(results, list):
+                for i, result in enumerate(results[:top_k]):
+                    if isinstance(result, dict):
+                        start_time = result.get('start_time', result.get('start', 0))
+                        end_time = result.get('end_time', result.get('end', 0))
+                        score = result.get('score', result.get('confidence', 0.5))
+                    elif isinstance(result, (list, tuple)) and len(result) >= 2:
+                        start_time = float(result[0])
+                        end_time = float(result[1])
+                        score = float(result[2]) if len(result) > 2 else 0.5
+                    else:
+                        continue
+                    
+                    start_frame = int(start_time * fps) if fps > 0 else int(start_time * 30)
+                    end_frame = int(end_time * fps) if fps > 0 else int(end_time * 30)
+                    
+                    moments.append({
+                        "start_time": float(start_time),
+                        "end_time": float(end_time),
+                        "start_frame": start_frame,
+                        "end_frame": end_frame,
+                        "score": float(score),
+                        "model_name": self.model_name
+                    })
+            
+            # If no results or empty, fall back to action recognition approach
+            if len(moments) == 0:
+                return self._action_recognition_retrieval(video_path, query, top_k)
+            
+            moments.sort(key=lambda x: x["score"], reverse=True)
+            return moments[:top_k]
+        
+        except Exception as e:
+            print(f"Error in temporal localization: {e}")
+            # Fallback to action recognition
+            return self._action_recognition_retrieval(video_path, query, top_k)
+    
+    def _action_recognition_retrieval(self, video_path: str, query: str, top_k: int = 5) -> List[Dict]:
+        """Retrieve moments using action recognition (TSN/SlowFast)."""
+        try:
+            # Run inference
+            results = self.inference_recognizer(self.model, video_path)
+            
+            # Extract frames and metadata
+            frames, fps, total_frames = self._extract_frames(video_path, num_frames=32)
+            if len(frames) == 0:
+                return []
+            
+            duration = total_frames / fps if fps > 0 else len(frames) / 30.0
+            
+            # Parse results - typically returns list of (class_name, score) tuples or dict
+            action_scores = []
+            if isinstance(results, list):
+                action_scores = results
+            elif isinstance(results, dict):
+                action_scores = list(results.items())
+            
+            # Extract query keywords
+            query_keywords = self._query_to_action_keywords(query)
+            
+            # Find matching actions
+            matching_actions = []
+            for action_name, score in action_scores:
+                action_lower = str(action_name).lower()
+                for keyword in query_keywords:
+                    if keyword in action_lower or action_lower in keyword:
+                        matching_actions.append((action_name, score))
+                        break
+            
+            # If no direct matches, use top actions
+            if len(matching_actions) == 0:
+                matching_actions = action_scores[:top_k]
+            
+            # Convert to moments using sliding window approach
+            # Since action recognition doesn't give temporal boundaries, we segment the video
+            moments = []
+            num_segments = min(len(matching_actions), top_k)
+            
+            for i, (action_name, score) in enumerate(matching_actions[:num_segments]):
+                # Divide video into segments
+                segment_duration = duration / num_segments
+                start_time = i * segment_duration
+                end_time = (i + 1) * segment_duration
+                
+                start_frame = int(start_time * fps) if fps > 0 else int((i / num_segments) * total_frames)
+                end_frame = int(end_time * fps) if fps > 0 else int(((i + 1) / num_segments) * total_frames)
+                
+                moments.append({
+                    "start_time": float(start_time),
+                    "end_time": float(end_time),
+                    "start_frame": start_frame,
+                    "end_frame": end_frame,
+                    "score": float(score) if isinstance(score, (int, float)) else 0.5,
+                    "model_name": self.model_name
+                })
+            
+            moments.sort(key=lambda x: x["score"], reverse=True)
+            return moments[:top_k]
+        
+        except Exception as e:
+            print(f"Error in action recognition retrieval: {e}")
+            return []
+    
+    def retrieve_moments(self, video_path: str, query: str, top_k: int = 5) -> List[Dict]:
+        """Retrieve moments using MMAction2."""
+        if not self.available:
+            raise RuntimeError(f"MMAction2 model unavailable: {self.error}")
+        
+        if not Path(video_path).exists():
+            return []
+        
+        try:
+            if self.mode == "temporal_localization":
+                return self._temporal_localization_retrieval(video_path, query, top_k)
+            else:  # action_recognition
+                return self._action_recognition_retrieval(video_path, query, top_k)
+        except Exception as e:
+            print(f"Error in MMAction2 retrieval: {e}")
+            return []
+
