@@ -16,6 +16,7 @@ def main():
     """Main execution function."""
     # Load dataset from HuggingFace (default) or local files
     use_huggingface = True
+    raw_data = []
     
     # Check if local dataset path is provided as command line argument
     if len(sys.argv) > 1:
@@ -28,21 +29,44 @@ def main():
     try:
         if use_huggingface:
             raw_data = load_snips_dataset(use_huggingface=True)
+            print(f"Loaded {len(raw_data)} examples from HuggingFace")
+            
+            # If no examples loaded, fall back to local
+            if len(raw_data) == 0:
+                print("\nWARNING: HuggingFace dataset returned 0 examples.")
+                print("Falling back to local dataset...")
+                use_huggingface = False
         else:
             raw_data = load_snips_dataset(dataset_path=dataset_path, use_huggingface=False)
-        print(f"Loaded {len(raw_data)} examples")
+            print(f"Loaded {len(raw_data)} examples from local files")
     except Exception as e:
-        print(f"Error loading dataset: {e}")
+        print(f"Error loading dataset from HuggingFace: {e}")
         print("\nTrying fallback to local dataset...")
-        # Fallback to local dataset
+        use_huggingface = False
+        raw_data = []
+    
+    # Fallback to local dataset if needed
+    if len(raw_data) == 0:
+        print("\nFalling back to local dataset...")
         project_root = Path(__file__).parent.parent
         dataset_path = project_root / "data" / "snips" / "2017-06-custom-intent-engines"
         if dataset_path.exists():
-            raw_data = load_snips_dataset(dataset_path=str(dataset_path), use_huggingface=False)
-            print(f"Loaded {len(raw_data)} examples from local files")
+            try:
+                raw_data = load_snips_dataset(dataset_path=str(dataset_path), use_huggingface=False)
+                print(f"Loaded {len(raw_data)} examples from local files")
+            except Exception as e:
+                print(f"Error loading local dataset: {e}")
+                sys.exit(1)
         else:
             print(f"Error: Could not load dataset from HuggingFace or local path: {dataset_path}")
+            print("Please ensure the SNIPS dataset is available either:")
+            print("  1. On HuggingFace (will be downloaded automatically)")
+            print(f"  2. At local path: {dataset_path}")
             sys.exit(1)
+    
+    if len(raw_data) == 0:
+        print("ERROR: No examples loaded from any source!")
+        sys.exit(1)
     
     # Preprocess data
     print("Preprocessing data...")

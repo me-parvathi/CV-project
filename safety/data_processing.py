@@ -103,8 +103,41 @@ def _load_snips_from_huggingface() -> List[Dict[str, Any]]:
         List of parsed examples in unified format
     """
     try:
-        # Load SNIPS dataset from HuggingFace
-        # Try multiple possible dataset names
+        # First, try loading individual custom intent datasets (these match our needs)
+        all_examples = []
+        intent_datasets = {
+            "AddToPlaylist": "snips_custom_intent_AddToPlaylist",
+            "BookRestaurant": "snips_custom_intent_BookRestaurant",
+            "GetWeather": "snips_custom_intent_GetWeather",
+            "PlayMusic": "snips_custom_intent_PlayMusic",
+            "RateBook": "snips_custom_intent_RateBook",
+            "SearchCreativeWork": "snips_custom_intent_SearchCreativeWork",
+            "SearchScreeningEvent": "snips_custom_intent_SearchScreeningEvent",
+        }
+        
+        print("Trying to load custom intent datasets...")
+        for intent_name, dataset_name in intent_datasets.items():
+            try:
+                intent_dataset = load_dataset(dataset_name)
+                print(f"  Loaded {dataset_name}")
+                # Process each split (train, validation, test)
+                for split_name in intent_dataset.keys():
+                    split_data = intent_dataset[split_name]
+                    print(f"    Processing {split_name} split: {len(split_data)} examples")
+                    for example in split_data:
+                        parsed = _parse_huggingface_example(example, intent_name)
+                        if parsed:
+                            all_examples.append(parsed)
+            except Exception as e:
+                print(f"  Warning: Could not load {dataset_name}: {e}")
+                continue
+        
+        if all_examples:
+            print(f"Successfully loaded {len(all_examples)} examples from custom intent datasets")
+            return all_examples
+        
+        # Fallback: Try loading combined SNIPS dataset
+        print("Custom intent datasets not available, trying combined dataset...")
         dataset_names = [
             "snips_built_in_intents",
             "AutoIntent/snips",
@@ -112,73 +145,83 @@ def _load_snips_from_huggingface() -> List[Dict[str, Any]]:
         ]
         
         dataset = None
+        dataset_name_used = None
         for name in dataset_names:
             try:
                 dataset = load_dataset(name)
+                dataset_name_used = name
                 print(f"Successfully loaded dataset: {name}")
                 break
             except Exception as e:
+                print(f"Failed to load {name}: {e}")
                 continue
         
         if dataset is None:
-            # Fallback: try loading the custom intents version
-            try:
-                # Load individual intent datasets
-                all_examples = []
-                intent_datasets = {
-                    "AddToPlaylist": "snips_custom_intent_AddToPlaylist",
-                    "BookRestaurant": "snips_custom_intent_BookRestaurant",
-                    "GetWeather": "snips_custom_intent_GetWeather",
-                    "PlayMusic": "snips_custom_intent_PlayMusic",
-                    "RateBook": "snips_custom_intent_RateBook",
-                    "SearchCreativeWork": "snips_custom_intent_SearchCreativeWork",
-                    "SearchScreeningEvent": "snips_custom_intent_SearchScreeningEvent",
-                }
-                
-                for intent_name, dataset_name in intent_datasets.items():
-                    try:
-                        intent_dataset = load_dataset(dataset_name)
-                        # Process each split (train, validation, test)
-                        for split_name in intent_dataset.keys():
-                            for example in intent_dataset[split_name]:
-                                parsed = _parse_huggingface_example(example, intent_name)
-                                if parsed:
-                                    all_examples.append(parsed)
-                    except Exception as e:
-                        print(f"Warning: Could not load {dataset_name}: {e}")
-                        continue
-                
-                if all_examples:
-                    return all_examples
-            except Exception as e:
-                pass
-            
             raise ValueError(f"Could not load SNIPS dataset from HuggingFace. Tried: {dataset_names}")
         
-        # Process the loaded dataset
-        all_examples = []
-        
-        # Handle different dataset structures
-        if isinstance(dataset, dict):
-            # Dataset has multiple splits
-            for split_name, split_data in dataset.items():
-                for example in split_data:
-                    # Extract intent and entities from HuggingFace format
+        # Process the loaded combined dataset
+        # HuggingFace datasets are DatasetDict objects with splits
+        # Check what splits are available
+        if hasattr(dataset, 'keys'):
+            splits = list(dataset.keys())
+            print(f"Available splits: {splits}")
+            
+            # Process each split
+            for split_name in splits:
+                split_data = dataset[split_name]
+                print(f"Processing split '{split_name}' with {len(split_data)} examples")
+                
+                # Check dataset structure
+                if len(split_data) > 0:
+                    sample = split_data[0]
+                    print(f"Sample keys: {sample.keys()}")
+                    print(f"Sample example (first 3): {dict(list(sample.items())[:3])}")
+                
+                # Filter for only the intents we need
+                required_intents = {
+                    "AddToPlaylist", "BookRestaurant", "GetWeather", 
+                    "PlayMusic", "RateBook", "SearchCreativeWork", "SearchScreeningEvent"
+                }
+                
+                # Iterate through examples
+                parsed_count = 0
+                skipped_count = 0
+                for idx, example in enumerate(split_data):
+                    # Check if intent matches our required intents
+                    example_intent = (example.get("intent") or example.get("intent_name") or 
+                                    example.get("label") or "")
+                    
+                    if example_intent not in required_intents:
+                        skipped_count += 1
+                        continue
+                    
                     parsed = _parse_huggingface_example(example)
                     if parsed:
                         all_examples.append(parsed)
+                        parsed_count += 1
+                    elif idx < 3:  # Debug first few failures
+                        print(f"Failed to parse example {idx}: {example}")
+                
+                print(f"  Parsed {parsed_count} examples, skipped {skipped_count} examples")
         else:
-            # Single dataset object
-            for example in dataset:
+            # Try to iterate directly
+            print("Dataset doesn't have splits, trying direct iteration...")
+            for idx, example in enumerate(dataset):
+                if idx < 3:
+                    print(f"Example {idx}: {example}")
                 parsed = _parse_huggingface_example(example)
                 if parsed:
                     all_examples.append(parsed)
         
+        print(f"Total parsed examples: {len(all_examples)}")
+        if len(all_examples) == 0:
+            print("WARNING: No examples were parsed. Check dataset structure.")
         return all_examples
         
     except Exception as e:
         print(f"Error loading from HuggingFace: {e}")
-        print("Falling back to local file loading...")
+        import traceback
+        traceback.print_exc()
         raise
 
 
@@ -194,13 +237,23 @@ def _parse_huggingface_example(example: Dict[str, Any], intent_name: Optional[st
         Parsed example dict or None if parsing fails
     """
     try:
-        # Extract text
-        text = example.get("text", example.get("utterance", example.get("query", "")))
-        if not text:
+        # Extract text - try multiple possible keys
+        text = (example.get("text") or example.get("utterance") or 
+                example.get("query") or example.get("sentence") or 
+                example.get("input") or "")
+        
+        # Handle case where text might be a list
+        if isinstance(text, list):
+            text = " ".join(str(t) for t in text)
+        
+        if not text or not isinstance(text, str):
             return None
         
-        # Extract intent
-        intent = intent_name or example.get("intent", example.get("intent_name", ""))
+        # Extract intent - try multiple possible keys
+        intent = (intent_name or example.get("intent") or 
+                 example.get("intent_name") or example.get("label") or
+                 example.get("intent_label") or "")
+        
         if not intent:
             return None
         
