@@ -1057,20 +1057,29 @@ class PyTorchVideoModel(EpisodicMemoryModel):
                     B, C, T, H, W = video_tensor.shape
                     
                     # Create slow pathway: sample every 8th frame
-                    # Ensure we have at least one frame
-                    slow_indices = torch.arange(0, T, 8, device=self.device)
+                    # Ensure we have at least one frame and proper shape
+                    slow_indices = torch.arange(0, T, 8, device=self.device, dtype=torch.long)
                     if len(slow_indices) == 0:
-                        slow_indices = torch.tensor([0], device=self.device)
-                    slow_pathway = video_tensor[:, :, slow_indices, :, :]
+                        slow_indices = torch.tensor([0], device=self.device, dtype=torch.long)
+                    
+                    # Use index_select for proper indexing to avoid shape issues
+                    slow_pathway = video_tensor.index_select(2, slow_indices)
                     
                     # Fast pathway: use all frames
                     fast_pathway = video_tensor
                     
+                    # Ensure both pathways have compatible shapes (same B, C, H, W)
+                    # Only temporal dimension should differ
+                    assert slow_pathway.shape[0] == fast_pathway.shape[0], "Batch size mismatch"
+                    assert slow_pathway.shape[1] == fast_pathway.shape[1], "Channel size mismatch"
+                    assert slow_pathway.shape[3] == fast_pathway.shape[3], "Height mismatch"
+                    assert slow_pathway.shape[4] == fast_pathway.shape[4], "Width mismatch"
+                    
                     # Pass as list to model
                     model_input = [slow_pathway, fast_pathway]
                 else:
-                    # Fallback: if shape is unexpected, try with single tensor wrapped in list
-                    # This shouldn't happen but provides a fallback
+                    # Fallback: if shape is unexpected, use single tensor for both pathways
+                    # This ensures compatibility even if shape is wrong
                     model_input = [video_tensor, video_tensor]
             else:
                 # For MViT and other models, use single tensor
@@ -1090,55 +1099,79 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             else:
                 features = output
             
-            # Extract features before classification head if possible
-            # Try to access intermediate features by checking model structure
-            if hasattr(self.pytorchvideo_model, 'blocks'):
-                # For transformer-based models (like MViT), we can extract from blocks
-                # For now, use the output and normalize
-                pass
+            # Ensure features is a tensor
+            if not isinstance(features, torch.Tensor):
+                raise ValueError(f"Expected tensor output, got {type(features)}")
             
-            # Ensure features are 2D: (batch, features)
-            while len(features.shape) > 2:
-                # Average pool over remaining dimensions
-                features = features.mean(dim=-1)
-            
-            if len(features.shape) > 2:
-                # Flatten if still not 2D
+            # CRITICAL FIX: Flatten features to 2D first (batch, features)
+            # Handle any number of dimensions by flattening all non-batch dimensions
+            if len(features.shape) == 1:
+                # Add batch dimension if missing
+                features = features.unsqueeze(0)
+            elif len(features.shape) > 2:
+                # Flatten all dimensions except batch
                 features = features.view(features.size(0), -1)
             
-            # CRITICAL FIX: Ensure consistent feature size by using global average pooling
-            # Flatten completely to 1D feature vector
-            features = features.view(features.size(0), -1)
+            # Ensure we have 2D tensor: (batch, features)
+            if len(features.shape) != 2:
+                features = features.view(features.size(0), -1)
             
-            # Use adaptive pooling to get fixed-size features (512 dimensions)
+            # CRITICAL FIX: Ensure consistent feature size (512 dimensions)
             # This ensures all segments produce the same feature size regardless of input
             target_size = 512
+            batch_size = features.shape[0]
             current_size = features.shape[1]
             
             if current_size > target_size:
                 # If features are too large, use mean pooling in chunks
-                chunk_size = current_size // target_size
+                # Pad to make current_size divisible by target_size
                 remainder = current_size % target_size
                 if remainder > 0:
-                    # Pad to make current_size divisible by target_size
+                    # Pad to make divisible
                     pad_size = target_size - remainder
-                    padding = torch.zeros(features.size(0), pad_size, 
+                    padding = torch.zeros(batch_size, pad_size, 
                                          device=features.device, dtype=features.dtype)
                     features = torch.cat([features, padding], dim=1)
                     current_size = features.shape[1]
-                    chunk_size = current_size // target_size
+                
                 # Reshape and average pool: (batch, target_size, chunk_size) -> (batch, target_size)
-                features = features.view(features.size(0), target_size, chunk_size).mean(dim=-1)
+                chunk_size = current_size // target_size
+                features = features.view(batch_size, target_size, chunk_size).mean(dim=-1)
             elif current_size < target_size:
                 # If features are too small, pad with zeros
-                padding = torch.zeros(features.size(0), target_size - current_size, 
+                padding = torch.zeros(batch_size, target_size - current_size, 
                                     device=features.device, dtype=features.dtype)
                 features = torch.cat([features, padding], dim=1)
+            
+            # Final validation: ensure exact target size
+            if features.shape[1] != target_size:
+                # Force to target size
+                if features.shape[1] > target_size:
+                    features = features[:, :target_size]
+                else:
+                    padding = torch.zeros(batch_size, target_size - features.shape[1],
+                                         device=features.device, dtype=features.dtype)
+                    features = torch.cat([features, padding], dim=1)
             
             # Normalize features
             features = features / (features.norm(dim=-1, keepdim=True) + 1e-8)
         
-        return features.squeeze(0)  # Remove batch dimension -> (features,)
+        # Remove batch dimension and ensure 1D output
+        features = features.squeeze(0)  # Remove batch dimension -> (features,)
+        
+        # Final validation: ensure output is exactly target_size
+        if len(features.shape) == 0:
+            features = features.unsqueeze(0)
+        if features.shape[0] != 512:
+            # Force to 512
+            if features.shape[0] > 512:
+                features = features[:512]
+            else:
+                padding = torch.zeros(512 - features.shape[0], 
+                                    device=features.device, dtype=features.dtype)
+                features = torch.cat([features, padding])
+        
+        return features  # Return (512,) tensor
     
     def retrieve_moments(self, video_path: str, query: str, top_k: int = 5) -> List[Dict]:
         """Retrieve moments using PyTorchVideo features and CLIP text matching."""
@@ -1172,6 +1205,28 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             segment_frames = frames[i:i+window_size]
             try:
                 segment_feature = self._extract_video_features(segment_frames)
+                
+                # Validate feature shape immediately after extraction
+                if not isinstance(segment_feature, torch.Tensor):
+                    print(f"Warning: Segment {i} returned non-tensor: {type(segment_feature)}")
+                    continue
+                
+                # Ensure feature is 1D and has correct size
+                if len(segment_feature.shape) == 0:
+                    segment_feature = segment_feature.unsqueeze(0)
+                elif len(segment_feature.shape) > 1:
+                    segment_feature = segment_feature.view(-1)
+                
+                # Validate size
+                if segment_feature.shape[0] != 512:
+                    print(f"Warning: Segment {i} has incorrect size {segment_feature.shape[0]}, expected 512. Fixing...")
+                    if segment_feature.shape[0] < 512:
+                        padding = torch.zeros(512 - segment_feature.shape[0],
+                                            device=segment_feature.device, dtype=segment_feature.dtype)
+                        segment_feature = torch.cat([segment_feature, padding])
+                    else:
+                        segment_feature = segment_feature[:512]
+                
                 segment_features.append(segment_feature)
                 segment_indices.append((i, min(i + window_size, len(frames))))
             except Exception as e:
@@ -1183,33 +1238,72 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             return []
         
         # CRITICAL FIX: Ensure all features have the same shape before stacking
-        # Normalize all features to the same size (in case some segments failed normalization)
+        # Double-check all features are properly normalized
         normalized_features = []
         target_size = 512  # Should match the target_size in _extract_video_features
         
-        for feat in segment_features:
-            # Ensure feature is 1D
-            if len(feat.shape) > 1:
-                feat = feat.view(-1)
-            elif len(feat.shape) == 0:
-                feat = feat.unsqueeze(0)
-            
-            current_size = feat.shape[0]
-            
-            # Pad or truncate to target_size
-            if current_size < target_size:
-                # Pad with zeros
-                padding = torch.zeros(target_size - current_size, 
-                                    device=feat.device, dtype=feat.dtype)
-                feat = torch.cat([feat, padding])
-            elif current_size > target_size:
-                # Truncate (shouldn't happen if _extract_video_features works correctly)
-                feat = feat[:target_size]
-            
-            normalized_features.append(feat)
+        for idx, feat in enumerate(segment_features):
+            try:
+                # Ensure feature is a tensor
+                if not isinstance(feat, torch.Tensor):
+                    print(f"Warning: Feature {idx} is not a tensor, skipping")
+                    continue
+                
+                # Ensure feature is 1D
+                if len(feat.shape) > 1:
+                    feat = feat.view(-1)
+                elif len(feat.shape) == 0:
+                    feat = feat.unsqueeze(0)
+                
+                current_size = feat.shape[0]
+                
+                # Validate and fix size
+                if current_size != target_size:
+                    if current_size < target_size:
+                        # Pad with zeros
+                        padding = torch.zeros(target_size - current_size, 
+                                            device=feat.device, dtype=feat.dtype)
+                        feat = torch.cat([feat, padding])
+                    elif current_size > target_size:
+                        # Truncate (shouldn't happen if _extract_video_features works correctly)
+                        feat = feat[:target_size]
+                
+                # Final validation
+                if feat.shape[0] != target_size:
+                    print(f"Warning: Feature {idx} still has incorrect size after normalization: {feat.shape[0]}")
+                    continue
+                
+                normalized_features.append(feat)
+            except Exception as e:
+                print(f"Warning: Error normalizing feature {idx}: {e}")
+                continue
+        
+        if len(normalized_features) == 0:
+            print("Warning: No valid features after normalization")
+            return []
+        
+        # Validate all features have same shape before stacking
+        first_shape = normalized_features[0].shape
+        for idx, feat in enumerate(normalized_features):
+            if feat.shape != first_shape:
+                print(f"Warning: Feature {idx} shape {feat.shape} doesn't match first feature shape {first_shape}")
+                # Force to match
+                if feat.shape[0] != first_shape[0]:
+                    if feat.shape[0] < first_shape[0]:
+                        padding = torch.zeros(first_shape[0] - feat.shape[0],
+                                            device=feat.device, dtype=feat.dtype)
+                        feat = torch.cat([feat, padding])
+                    else:
+                        feat = feat[:first_shape[0]]
+                normalized_features[idx] = feat
         
         # Stack features and compute similarities
-        segment_features_tensor = torch.stack(normalized_features).to(self.device)
+        try:
+            segment_features_tensor = torch.stack(normalized_features).to(self.device)
+        except Exception as e:
+            print(f"Error stacking features: {e}")
+            print(f"Feature shapes: {[f.shape for f in normalized_features]}")
+            return []
         similarities = (segment_features_tensor @ query_embedding.T).squeeze().cpu().numpy()
         
         # Convert to moments
