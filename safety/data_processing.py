@@ -2,8 +2,9 @@
 
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from sklearn.model_selection import train_test_split
+from datasets import load_dataset
 
 
 def map_intent_to_system(snips_intent: str) -> str:
@@ -76,9 +77,211 @@ def parse_snips_example(example: Dict[str, Any], intent: str) -> Dict[str, Any]:
     }
 
 
-def load_snips_dataset(dataset_path: str) -> List[Dict[str, Any]]:
+def load_snips_dataset(dataset_path: Optional[str] = None, use_huggingface: bool = True) -> List[Dict[str, Any]]:
     """
-    Load all SNIPS JSON files from dataset directory.
+    Load SNIPS dataset from HuggingFace or local directory.
+    
+    Args:
+        dataset_path: Path to SNIPS dataset root (2017-06-custom-intent-engines folder).
+                     Only used if use_huggingface=False.
+        use_huggingface: If True, load from HuggingFace. If False, load from local files.
+        
+    Returns:
+        List of parsed examples in unified format
+    """
+    if use_huggingface:
+        return _load_snips_from_huggingface()
+    else:
+        return _load_snips_from_local(dataset_path)
+
+
+def _load_snips_from_huggingface() -> List[Dict[str, Any]]:
+    """
+    Load SNIPS dataset from HuggingFace.
+    
+    Returns:
+        List of parsed examples in unified format
+    """
+    try:
+        # Load SNIPS dataset from HuggingFace
+        # Try multiple possible dataset names
+        dataset_names = [
+            "snips_built_in_intents",
+            "AutoIntent/snips",
+            "snips",
+        ]
+        
+        dataset = None
+        for name in dataset_names:
+            try:
+                dataset = load_dataset(name)
+                print(f"Successfully loaded dataset: {name}")
+                break
+            except Exception as e:
+                continue
+        
+        if dataset is None:
+            # Fallback: try loading the custom intents version
+            try:
+                # Load individual intent datasets
+                all_examples = []
+                intent_datasets = {
+                    "AddToPlaylist": "snips_custom_intent_AddToPlaylist",
+                    "BookRestaurant": "snips_custom_intent_BookRestaurant",
+                    "GetWeather": "snips_custom_intent_GetWeather",
+                    "PlayMusic": "snips_custom_intent_PlayMusic",
+                    "RateBook": "snips_custom_intent_RateBook",
+                    "SearchCreativeWork": "snips_custom_intent_SearchCreativeWork",
+                    "SearchScreeningEvent": "snips_custom_intent_SearchScreeningEvent",
+                }
+                
+                for intent_name, dataset_name in intent_datasets.items():
+                    try:
+                        intent_dataset = load_dataset(dataset_name)
+                        # Process each split (train, validation, test)
+                        for split_name in intent_dataset.keys():
+                            for example in intent_dataset[split_name]:
+                                parsed = _parse_huggingface_example(example, intent_name)
+                                if parsed:
+                                    all_examples.append(parsed)
+                    except Exception as e:
+                        print(f"Warning: Could not load {dataset_name}: {e}")
+                        continue
+                
+                if all_examples:
+                    return all_examples
+            except Exception as e:
+                pass
+            
+            raise ValueError(f"Could not load SNIPS dataset from HuggingFace. Tried: {dataset_names}")
+        
+        # Process the loaded dataset
+        all_examples = []
+        
+        # Handle different dataset structures
+        if isinstance(dataset, dict):
+            # Dataset has multiple splits
+            for split_name, split_data in dataset.items():
+                for example in split_data:
+                    # Extract intent and entities from HuggingFace format
+                    parsed = _parse_huggingface_example(example)
+                    if parsed:
+                        all_examples.append(parsed)
+        else:
+            # Single dataset object
+            for example in dataset:
+                parsed = _parse_huggingface_example(example)
+                if parsed:
+                    all_examples.append(parsed)
+        
+        return all_examples
+        
+    except Exception as e:
+        print(f"Error loading from HuggingFace: {e}")
+        print("Falling back to local file loading...")
+        raise
+
+
+def _parse_huggingface_example(example: Dict[str, Any], intent_name: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    Parse a HuggingFace dataset example into unified format.
+    
+    Args:
+        example: Example from HuggingFace dataset
+        intent_name: Optional intent name if not in example
+        
+    Returns:
+        Parsed example dict or None if parsing fails
+    """
+    try:
+        # Extract text
+        text = example.get("text", example.get("utterance", example.get("query", "")))
+        if not text:
+            return None
+        
+        # Extract intent
+        intent = intent_name or example.get("intent", example.get("intent_name", ""))
+        if not intent:
+            return None
+        
+        # Extract entities
+        entities = []
+        
+        # Try different entity formats
+        if "entities" in example:
+            # Format: [{"text": "...", "entity": "...", "start": int, "end": int}]
+            for entity in example["entities"]:
+                entities.append({
+                    "text": entity.get("text", entity.get("value", "")),
+                    "start": entity.get("start", 0),
+                    "end": entity.get("end", 0),
+                    "entity_type": entity.get("entity", entity.get("entity_type", entity.get("slot_name", "")))
+                })
+        elif "slots" in example:
+            # Format: [{"slot_name": "...", "value": "...", "start": int, "end": int}]
+            for slot in example["slots"]:
+                entities.append({
+                    "text": slot.get("value", ""),
+                    "start": slot.get("start", 0),
+                    "end": slot.get("end", 0),
+                    "entity_type": slot.get("slot_name", slot.get("entity", ""))
+                })
+        elif "tags" in example:
+            # BIO tagging format - need to convert to spans
+            tags = example["tags"]
+            words = text.split() if isinstance(tags, list) else []
+            if len(tags) == len(words):
+                current_entity = None
+                char_pos = 0
+                for word, tag in zip(words, tags):
+                    word_start = text.find(word, char_pos)
+                    if word_start == -1:
+                        word_start = char_pos
+                    word_end = word_start + len(word)
+                    
+                    if tag.startswith("B-") or (tag.startswith("I-") and current_entity is None):
+                        # Start new entity
+                        if current_entity:
+                            entities.append(current_entity)
+                        entity_type = tag.split("-", 1)[1] if "-" in tag else tag
+                        current_entity = {
+                            "text": word,
+                            "start": word_start,
+                            "end": word_end,
+                            "entity_type": entity_type
+                        }
+                    elif tag.startswith("I-") and current_entity:
+                        # Extend entity
+                        current_entity["end"] = word_end
+                        current_entity["text"] = text[current_entity["start"]:word_end]
+                    else:
+                        # O tag or end of entity
+                        if current_entity:
+                            entities.append(current_entity)
+                            current_entity = None
+                    
+                    char_pos = word_end
+                
+                if current_entity:
+                    entities.append(current_entity)
+        
+        # Map intent to system intent
+        system_intent = map_intent_to_system(intent)
+        
+        return {
+            "text": text,
+            "intent": system_intent,
+            "entities": entities,
+            "original_intent": intent
+        }
+    except Exception as e:
+        print(f"Warning: Failed to parse example: {e}")
+        return None
+
+
+def _load_snips_from_local(dataset_path: str) -> List[Dict[str, Any]]:
+    """
+    Load SNIPS dataset from local JSON files (fallback method).
     
     Args:
         dataset_path: Path to SNIPS dataset root (2017-06-custom-intent-engines folder)

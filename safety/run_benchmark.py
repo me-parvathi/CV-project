@@ -14,18 +14,35 @@ from benchmarking import BenchmarkRunner
 
 def main():
     """Main execution function."""
-    # Set dataset path
-    project_root = Path(__file__).parent.parent
-    dataset_path = project_root / "data" / "snips" / "2017-06-custom-intent-engines"
+    # Load dataset from HuggingFace (default) or local files
+    use_huggingface = True
     
-    if not dataset_path.exists():
-        print(f"Error: Dataset path not found: {dataset_path}")
-        print("Please ensure the SNIPS dataset is available at the expected location.")
-        sys.exit(1)
+    # Check if local dataset path is provided as command line argument
+    if len(sys.argv) > 1:
+        dataset_path = sys.argv[1]
+        use_huggingface = False
+        print(f"Loading SNIPS dataset from local path: {dataset_path}")
+    else:
+        print("Loading SNIPS dataset from HuggingFace...")
     
-    print("Loading SNIPS dataset...")
-    raw_data = load_snips_dataset(str(dataset_path))
-    print(f"Loaded {len(raw_data)} examples")
+    try:
+        if use_huggingface:
+            raw_data = load_snips_dataset(use_huggingface=True)
+        else:
+            raw_data = load_snips_dataset(dataset_path=dataset_path, use_huggingface=False)
+        print(f"Loaded {len(raw_data)} examples")
+    except Exception as e:
+        print(f"Error loading dataset: {e}")
+        print("\nTrying fallback to local dataset...")
+        # Fallback to local dataset
+        project_root = Path(__file__).parent.parent
+        dataset_path = project_root / "data" / "snips" / "2017-06-custom-intent-engines"
+        if dataset_path.exists():
+            raw_data = load_snips_dataset(dataset_path=str(dataset_path), use_huggingface=False)
+            print(f"Loaded {len(raw_data)} examples from local files")
+        else:
+            print(f"Error: Could not load dataset from HuggingFace or local path: {dataset_path}")
+            sys.exit(1)
     
     # Preprocess data
     print("Preprocessing data...")
