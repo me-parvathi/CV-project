@@ -888,6 +888,7 @@ class PyTorchVideoModel(EpisodicMemoryModel):
         """
         self.device = device
         self.video_model_name = model_name.lower()
+        # Use global torch import (already imported at top of file)
         self.use_amp = use_amp and device == "cuda" and torch.cuda.is_available()
         self.num_frames = num_frames
         
@@ -901,7 +902,6 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             raise ValueError(f"Unsupported model_name: {model_name}. Use 'slowfast' or 'mvit'")
         
         try:
-            import torch
             from transformers import CLIPProcessor, CLIPModel as HFCLIPModel
             
             # Load PyTorchVideo model using torch.hub
