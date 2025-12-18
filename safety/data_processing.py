@@ -166,6 +166,20 @@ def _load_snips_from_huggingface() -> List[Dict[str, Any]]:
             splits = list(dataset.keys())
             print(f"Available splits: {splits}")
             
+            # Get label mapping if available (for numeric labels)
+            label_names = None
+            if len(splits) > 0:
+                split_data = dataset[splits[0]]
+                if hasattr(split_data, 'features') and 'label' in split_data.features:
+                    label_feature = split_data.features['label']
+                    if hasattr(label_feature, 'names'):
+                        label_names = label_feature.names
+                        print(f"Label names: {label_names}")
+                    elif hasattr(label_feature, '_str2int'):
+                        # Reverse the mapping
+                        label_names = {v: k for k, v in label_feature._str2int.items()}
+                        print(f"Label mapping: {label_names}")
+            
             # Process each split
             for split_name in splits:
                 split_data = dataset[split_name]
@@ -187,20 +201,39 @@ def _load_snips_from_huggingface() -> List[Dict[str, Any]]:
                 parsed_count = 0
                 skipped_count = 0
                 for idx, example in enumerate(split_data):
-                    # Check if intent matches our required intents
-                    example_intent = (example.get("intent") or example.get("intent_name") or 
-                                    example.get("label") or "")
+                    # Get intent - handle numeric labels
+                    example_intent = None
+                    label_value = example.get("label")
                     
-                    if example_intent not in required_intents:
+                    if label_value is not None:
+                        # Handle numeric labels
+                        if isinstance(label_value, (int, float)):
+                            if label_names:
+                                if isinstance(label_names, dict):
+                                    example_intent = label_names.get(int(label_value))
+                                elif isinstance(label_names, list) and int(label_value) < len(label_names):
+                                    example_intent = label_names[int(label_value)]
+                        elif isinstance(label_value, str):
+                            example_intent = label_value
+                    
+                    # Fallback to other fields
+                    if not example_intent:
+                        example_intent = (example.get("intent") or example.get("intent_name") or "")
+                    
+                    # Check if this intent matches our required intents
+                    if example_intent and example_intent not in required_intents:
                         skipped_count += 1
+                        if idx < 3:
+                            print(f"  Skipping example {idx}: intent '{example_intent}' not in required intents")
                         continue
                     
-                    parsed = _parse_huggingface_example(example)
+                    # Parse with the intent name
+                    parsed = _parse_huggingface_example(example, intent_name=example_intent)
                     if parsed:
                         all_examples.append(parsed)
                         parsed_count += 1
                     elif idx < 3:  # Debug first few failures
-                        print(f"Failed to parse example {idx}: {example}")
+                        print(f"  Failed to parse example {idx}: {example}")
                 
                 print(f"  Parsed {parsed_count} examples, skipped {skipped_count} examples")
         else:
@@ -215,7 +248,10 @@ def _load_snips_from_huggingface() -> List[Dict[str, Any]]:
         
         print(f"Total parsed examples: {len(all_examples)}")
         if len(all_examples) == 0:
-            print("WARNING: No examples were parsed. Check dataset structure.")
+            print("WARNING: No examples were parsed from HuggingFace dataset.")
+            print("The dataset may not contain the required custom intents:")
+            print("  AddToPlaylist, BookRestaurant, GetWeather, PlayMusic, RateBook, SearchCreativeWork, SearchScreeningEvent")
+            print("Falling back to local dataset...")
         return all_examples
         
     except Exception as e:
@@ -250,12 +286,26 @@ def _parse_huggingface_example(example: Dict[str, Any], intent_name: Optional[st
             return None
         
         # Extract intent - try multiple possible keys
-        intent = (intent_name or example.get("intent") or 
-                 example.get("intent_name") or example.get("label") or
-                 example.get("intent_label") or "")
+        # If intent_name is provided, use it (already mapped from numeric label)
+        if intent_name:
+            intent = intent_name
+        else:
+            # Try to get from example
+            label_value = example.get("label")
+            if label_value is not None and isinstance(label_value, (int, float)):
+                # This is a numeric label - we should have mapped it earlier
+                # But if we're here, try to get it from features
+                intent = str(label_value)  # Fallback
+            else:
+                intent = (example.get("intent") or example.get("intent_name") or 
+                         str(label_value) if label_value is not None else "" or
+                         example.get("intent_label") or "")
         
         if not intent:
             return None
+        
+        # Normalize intent name (handle case variations)
+        intent = intent.strip()
         
         # Extract entities
         entities = []
