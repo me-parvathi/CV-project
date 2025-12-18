@@ -1025,68 +1025,121 @@ class PyTorchVideoModel(EpisodicMemoryModel):
         if self.pytorchvideo_transforms:
             try:
                 # PyTorchVideo expects dict with "video" key
+                # Input should be (T, C, H, W) for transforms
                 video_dict = {"video": video_tensor}
                 video_dict = self.pytorchvideo_transforms(video_dict)
                 video_tensor = video_dict["video"]
+                # Transforms output should be (C, T, H, W) based on the Lambda transform
             except Exception as e:
                 # If transforms fail, use basic preprocessing
                 video_tensor = video_tensor / 255.0
                 if len(video_tensor.shape) == 4:
-                    video_tensor = video_tensor.permute(1, 0, 2, 3)  # (C, T, H, W)
+                    # Ensure (C, T, H, W) format
+                    if video_tensor.shape[0] == 3:  # Channels first
+                        pass  # Already (C, T, H, W)
+                    else:
+                        video_tensor = video_tensor.permute(1, 0, 2, 3)  # (T, C, H, W) -> (C, T, H, W)
         
-        # Ensure correct format: (C, T, H, W) or (1, C, T, H, W)
+        # Ensure correct format: (C, T, H, W) -> (B, C, T, H, W)
         if len(video_tensor.shape) == 4:
-            # Assume (C, T, H, W), add batch dimension
-            video_tensor = video_tensor.unsqueeze(0)
+            # Check if it's (C, T, H, W) or (T, C, H, W)
+            if video_tensor.shape[0] == 3:  # RGB channels
+                # Assume (C, T, H, W), add batch dimension
+                video_tensor = video_tensor.unsqueeze(0)  # (1, C, T, H, W)
+            else:
+                # Might be (T, C, H, W), rearrange
+                video_tensor = video_tensor.permute(1, 0, 2, 3).unsqueeze(0)  # (1, C, T, H, W)
         elif len(video_tensor.shape) == 3:
             # Assume (T, C, H, W), rearrange and add batch
             video_tensor = video_tensor.permute(1, 0, 2, 3).unsqueeze(0)
+        elif len(video_tensor.shape) == 5:
+            # Already has batch dimension, ensure it's (B, C, T, H, W)
+            if video_tensor.shape[1] != 3:  # Channels not in position 1
+                # Might be (B, T, C, H, W), permute to (B, C, T, H, W)
+                video_tensor = video_tensor.permute(0, 2, 1, 3, 4)
+        
+        # Final check: ensure we have (B, C, T, H, W) format
+        if len(video_tensor.shape) != 5 or video_tensor.shape[1] != 3:
+            # Force to correct format
+            if len(video_tensor.shape) == 4:
+                video_tensor = video_tensor.unsqueeze(0)
+            # Ensure channels are in position 1
+            if len(video_tensor.shape) == 5 and video_tensor.shape[2] == 3:
+                video_tensor = video_tensor.permute(0, 2, 1, 3, 4)
         
         video_tensor = video_tensor.to(self.device)
         
         # Extract features
         with torch.no_grad():
-            # For SlowFast models, prepare dual-pathway inputs
-            if self.video_model_name == "slowfast":
-                # SlowFast expects a list of two tensors: [slow_pathway, fast_pathway]
-                # Slow pathway: 1/8 temporal rate (alpha = 8)
-                # Fast pathway: full temporal rate (alpha = 1)
-                
-                # Get temporal dimension - video_tensor should be (B, C, T, H, W)
-                if len(video_tensor.shape) == 5:
-                    B, C, T, H, W = video_tensor.shape
-                    
-                    # Create slow pathway: sample every 8th frame
-                    # Ensure we have at least one frame and proper shape
-                    slow_indices = torch.arange(0, T, 8, device=self.device, dtype=torch.long)
-                    if len(slow_indices) == 0:
-                        slow_indices = torch.tensor([0], device=self.device, dtype=torch.long)
-                    
-                    # Use index_select for proper indexing to avoid shape issues
-                    slow_pathway = video_tensor.index_select(2, slow_indices)
-                    
-                    # Fast pathway: use all frames
-                    fast_pathway = video_tensor
-                    
-                    # Ensure both pathways have compatible shapes (same B, C, H, W)
-                    # Only temporal dimension should differ
-                    assert slow_pathway.shape[0] == fast_pathway.shape[0], "Batch size mismatch"
-                    assert slow_pathway.shape[1] == fast_pathway.shape[1], "Channel size mismatch"
-                    assert slow_pathway.shape[3] == fast_pathway.shape[3], "Height mismatch"
-                    assert slow_pathway.shape[4] == fast_pathway.shape[4], "Width mismatch"
-                    
-                    # Pass as list to model
-                    model_input = [slow_pathway, fast_pathway]
-                else:
-                    # Fallback: if shape is unexpected, use single tensor for both pathways
-                    # This ensures compatibility even if shape is wrong
-                    model_input = [video_tensor, video_tensor]
-            else:
-                # For MViT and other models, use single tensor
-                model_input = video_tensor
+            # PyTorchVideo models from torch.hub - try different input formats
+            # Some models expect single tensor, others expect list for SlowFast
+            model_input = video_tensor
+            output = None
+            last_error = None
             
-            # PyTorchVideo models return features/logits
-            output = self.pytorchvideo_model(model_input)
+            # Try 1: Single tensor input (most common)
+            try:
+                output = self.pytorchvideo_model(model_input)
+            except Exception as e1:
+                last_error = e1
+                error_msg = str(e1)
+                
+                # If error mentions "list" or "tensor number", model might expect list input
+                if "list" in error_msg.lower() or "tensor number" in error_msg.lower() or "Sizes of tensors must match" in error_msg:
+                    # Try 2: List input for SlowFast dual-pathway
+                    if self.video_model_name == "slowfast" and len(video_tensor.shape) == 5:
+                        B, C, T, H, W = video_tensor.shape
+                        
+                        # For SlowFast, we need to ensure both pathways have compatible shapes
+                        # Slow pathway should have T/8 frames, but we need at least 1
+                        # Fast pathway has T frames
+                        # The model expects them to have same B, C, H, W but different T
+                        
+                        # Create slow pathway: sample every 8th frame, but ensure we have at least 1
+                        slow_T = max(1, T // 8)  # At least 1 frame for slow pathway
+                        slow_indices = torch.linspace(0, T - 1, slow_T, device=self.device, dtype=torch.long)
+                        slow_pathway = video_tensor.index_select(2, slow_indices)
+                        
+                        # Fast pathway: use all frames
+                        fast_pathway = video_tensor
+                        
+                        # Ensure both have same batch, channel, height, width
+                        # They should already match, but verify
+                        assert slow_pathway.shape[0] == fast_pathway.shape[0], f"Batch mismatch: {slow_pathway.shape[0]} vs {fast_pathway.shape[0]}"
+                        assert slow_pathway.shape[1] == fast_pathway.shape[1], f"Channel mismatch: {slow_pathway.shape[1]} vs {fast_pathway.shape[1]}"
+                        assert slow_pathway.shape[3] == fast_pathway.shape[3], f"Height mismatch: {slow_pathway.shape[3]} vs {fast_pathway.shape[3]}"
+                        assert slow_pathway.shape[4] == fast_pathway.shape[4], f"Width mismatch: {slow_pathway.shape[4]} vs {fast_pathway.shape[4]}"
+                        
+                        # Try with list input
+                        try:
+                            model_input = [slow_pathway, fast_pathway]
+                            output = self.pytorchvideo_model(model_input)
+                        except Exception as e2:
+                            last_error = e2
+                            # Try 3: Ensure slow pathway has at least 2 frames if fast has more
+                            if slow_pathway.shape[2] == 1 and fast_pathway.shape[2] > 1:
+                                # Repeat the single frame to match temporal structure
+                                slow_pathway = slow_pathway.repeat(1, 1, min(2, fast_pathway.shape[2]), 1, 1)
+                                try:
+                                    model_input = [slow_pathway, fast_pathway]
+                                    output = self.pytorchvideo_model(model_input)
+                                except Exception as e3:
+                                    last_error = e3
+                                    # Try 4: Same tensor for both pathways (fallback)
+                                    try:
+                                        model_input = [video_tensor, video_tensor]
+                                        output = self.pytorchvideo_model(model_input)
+                                    except Exception as e4:
+                                        last_error = e4
+                                        raise RuntimeError(f"Failed to extract features with multiple input formats. Last error: {last_error}")
+                            else:
+                                raise RuntimeError(f"Failed to extract features. Error: {last_error}")
+                else:
+                    # Other error, re-raise
+                    raise
+            
+            if output is None:
+                raise RuntimeError(f"Failed to extract features. Last error: {last_error}")
             
             # Handle different output formats
             if isinstance(output, tuple):
@@ -1105,16 +1158,45 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             
             # CRITICAL FIX: Flatten features to 2D first (batch, features)
             # Handle any number of dimensions by flattening all non-batch dimensions
+            original_shape = features.shape
+            
+            # If features has more than 2 dimensions, we need to flatten
             if len(features.shape) == 1:
-                # Add batch dimension if missing
+                # Add batch dimension if missing: (features,) -> (1, features)
                 features = features.unsqueeze(0)
             elif len(features.shape) > 2:
-                # Flatten all dimensions except batch
-                features = features.view(features.size(0), -1)
+                # Flatten all dimensions except batch: (B, ...) -> (B, features)
+                # Use global average pooling for spatial dimensions, then flatten temporal
+                # For video features, we typically have (B, C, T, H, W) or (B, T, C, H, W)
+                if len(features.shape) == 5:
+                    # (B, C, T, H, W) or (B, T, C, H, W) - need to determine
+                    B = features.shape[0]
+                    # Try to identify format by checking if C=3 (RGB)
+                    if features.shape[1] == 3:
+                        # (B, C, T, H, W) format
+                        # Global average pool over spatial and temporal: (B, C, T, H, W) -> (B, C)
+                        features = features.mean(dim=(2, 3, 4))  # Average over T, H, W
+                    elif features.shape[2] == 3:
+                        # (B, T, C, H, W) format
+                        features = features.mean(dim=(1, 3, 4))  # Average over T, H, W
+                    else:
+                        # Unknown format, flatten all except batch
+                        features = features.view(B, -1)
+                elif len(features.shape) == 4:
+                    # (B, C, H, W) or (B, T, H, W) - global average pool spatial
+                    features = features.mean(dim=(2, 3))  # Average over H, W
+                elif len(features.shape) == 3:
+                    # (B, T, C) or (B, C, T) - average over temporal
+                    features = features.mean(dim=1)  # Average over middle dimension
+                else:
+                    # Fallback: flatten all except batch
+                    features = features.view(features.size(0), -1)
             
             # Ensure we have 2D tensor: (batch, features)
             if len(features.shape) != 2:
-                features = features.view(features.size(0), -1)
+                # Force to 2D
+                batch_size = features.shape[0] if len(features.shape) > 0 else 1
+                features = features.view(batch_size, -1)
             
             # CRITICAL FIX: Ensure consistent feature size (512 dimensions)
             # This ensures all segments produce the same feature size regardless of input
