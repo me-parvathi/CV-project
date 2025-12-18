@@ -115,7 +115,7 @@ class MomentRetrievalModel(EpisodicMemoryModel):
     
     def _clip_based_retrieval(self, video_path: str, query: str, top_k: int = 5) -> List[Dict]:
         """Fallback CLIP-based retrieval if Moment-DETR is not available."""
-        frames = self._extract_frames(video_path, num_frames=32)
+        frames = self._extract_frames(video_path, num_frames=64)
         if len(frames) == 0:
             return []
         
@@ -126,21 +126,29 @@ class MomentRetrievalModel(EpisodicMemoryModel):
         if cap.isOpened():
             cap.release()
         
+        # Use mixed precision for faster inference
+        use_amp = self.device == "cuda" and torch.cuda.is_available()
+        autocast_context = torch.cuda.amp.autocast(enabled=use_amp, dtype=torch.float16) if use_amp else torch.no_grad()
+        
         # Encode query
         query_inputs = self.clip_processor(text=[query], return_tensors="pt", padding=True).to(self.device)
         with torch.no_grad():
-            query_embedding = self.clip_model.get_text_features(**query_inputs)
-            query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
+            with autocast_context:
+                query_embedding = self.clip_model.get_text_features(**query_inputs)
+                query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
         
         # Encode frames
         frame_images = [Image.fromarray(frame) for frame in frames]
         frame_inputs = self.clip_processor(images=frame_images, return_tensors="pt", padding=True).to(self.device)
         with torch.no_grad():
-            frame_embeddings = self.clip_model.get_image_features(**frame_inputs)
-            frame_embeddings = frame_embeddings / frame_embeddings.norm(dim=-1, keepdim=True)
+            with autocast_context:
+                frame_embeddings = self.clip_model.get_image_features(**frame_inputs)
+                frame_embeddings = frame_embeddings / frame_embeddings.norm(dim=-1, keepdim=True)
         
-        # Compute similarities
-        similarities = (frame_embeddings @ query_embedding.T).squeeze().cpu().numpy()
+        # Compute similarities (keep on GPU for better utilization)
+        similarities_tensor = (frame_embeddings @ query_embedding.T).squeeze()
+        # Only move to CPU when needed for numpy operations
+        similarities = similarities_tensor.cpu().numpy()
         
         # Group frames into moments (sliding window approach)
         window_size = max(4, len(frames) // 8)  # Adaptive window size
@@ -195,23 +203,31 @@ class MomentRetrievalModel(EpisodicMemoryModel):
 class CLIPModel(EpisodicMemoryModel):
     """CLIP model for video-text retrieval."""
     
-    def __init__(self, device: str = "cuda", model_name: str = "openai/clip-vit-base-patch32"):
+    def __init__(self, device: str = "cuda", model_name: str = "openai/clip-vit-base-patch32", 
+                 use_amp: bool = True, num_frames: int = 64):
         """
         Initialize CLIP model.
         
         Args:
             device: Device to run model on ('cuda' or 'cpu').
             model_name: HuggingFace model identifier for CLIP.
+            use_amp: Enable automatic mixed precision (FP16) for faster inference.
+            num_frames: Number of frames to extract per video (default: 64 for better GPU utilization).
         """
         self.device = device
         self.model_name = "CLIP"
         self.hf_model_name = model_name
+        self.use_amp = use_amp and device == "cuda" and torch.cuda.is_available()
+        self.num_frames = num_frames
         try:
             from transformers import CLIPProcessor, CLIPModel as HFCLIPModel
             
             self.processor = CLIPProcessor.from_pretrained(model_name)
             self.model = HFCLIPModel.from_pretrained(model_name).to(device)
             self.model.eval()
+            # Enable half precision if AMP is enabled
+            if self.use_amp:
+                self.model = self.model.half()
             self.available = True
         except Exception as e:
             self.available = False
@@ -220,7 +236,7 @@ class CLIPModel(EpisodicMemoryModel):
     def get_model_name(self) -> str:
         return self.model_name
     
-    def _extract_frames(self, video_path: str, num_frames: int = 32) -> Tuple[List[np.ndarray], float, int]:
+    def _extract_frames(self, video_path: str, num_frames: int = 64) -> Tuple[List[np.ndarray], float, int]:
         """Extract frames from video and return metadata."""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -255,28 +271,41 @@ class CLIPModel(EpisodicMemoryModel):
         if not Path(video_path).exists():
             return []
         
-        # Extract frames
-        frames, fps, total_frames = self._extract_frames(video_path, num_frames=32)
+        # Extract frames (increased batch size for better GPU utilization)
+        frames, fps, total_frames = self._extract_frames(video_path, num_frames=self.num_frames)
         if len(frames) == 0:
             return []
         
         duration = total_frames / fps if fps > 0 else len(frames) / 30.0
         
+        # Use mixed precision for faster inference
+        autocast_context = torch.cuda.amp.autocast(enabled=self.use_amp, dtype=torch.float16) if self.use_amp else torch.no_grad()
+        
         # Encode query
         query_inputs = self.processor(text=[query], return_tensors="pt", padding=True).to(self.device)
-        with torch.no_grad():
-            query_embedding = self.model.get_text_features(**query_inputs)
-            query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
+        if self.use_amp and query_inputs['input_ids'].dtype != torch.int64:
+            # Ensure input_ids are int64
+            query_inputs['input_ids'] = query_inputs['input_ids'].long()
         
-        # Encode frames
+        with torch.no_grad():
+            with autocast_context:
+                query_embedding = self.model.get_text_features(**query_inputs)
+                query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
+        
+        # Encode frames in batches for better GPU utilization
         frame_images = [Image.fromarray(frame) for frame in frames]
         frame_inputs = self.processor(images=frame_images, return_tensors="pt", padding=True).to(self.device)
-        with torch.no_grad():
-            frame_embeddings = self.model.get_image_features(**frame_inputs)
-            frame_embeddings = frame_embeddings / frame_embeddings.norm(dim=-1, keepdim=True)
         
-        # Compute similarities
-        similarities = (frame_embeddings @ query_embedding.T).squeeze().cpu().numpy()
+        with torch.no_grad():
+            with autocast_context:
+                frame_embeddings = self.model.get_image_features(**frame_inputs)
+                frame_embeddings = frame_embeddings / frame_embeddings.norm(dim=-1, keepdim=True)
+        
+        # Compute similarities (keep on GPU for better utilization)
+        # Use GPU tensor operations instead of moving to CPU immediately
+        similarities_tensor = (frame_embeddings @ query_embedding.T).squeeze()
+        # Only move to CPU when needed for numpy operations
+        similarities = similarities_tensor.cpu().numpy()
         
         # Group frames into moments using sliding window
         window_size = max(4, len(frames) // 8)
@@ -316,17 +345,22 @@ class CLIPModel(EpisodicMemoryModel):
 class FAISSIndex(EpisodicMemoryModel):
     """FAISS-based retrieval using pre-computed embeddings."""
     
-    def __init__(self, device: str = "cuda", embedding_model: str = "openai/clip-vit-base-patch32"):
+    def __init__(self, device: str = "cuda", embedding_model: str = "openai/clip-vit-base-patch32", 
+                 use_amp: bool = True, num_frames: int = 64):
         """
         Initialize FAISS index.
         
         Args:
             device: Device to run embedding model on ('cuda' or 'cpu').
             embedding_model: Model to use for generating embeddings (default: CLIP).
+            use_amp: Enable automatic mixed precision (FP16) for faster inference.
+            num_frames: Number of frames to extract per video (default: 64 for better GPU utilization).
         """
         self.device = device
         self.model_name = "FAISS"
         self.embedding_model_name = embedding_model
+        self.use_amp = use_amp and device == "cuda" and torch.cuda.is_available()
+        self.num_frames = num_frames
         try:
             import faiss
             from transformers import CLIPProcessor, CLIPModel as HFCLIPModel
@@ -335,6 +369,8 @@ class FAISSIndex(EpisodicMemoryModel):
             self.processor = CLIPProcessor.from_pretrained(embedding_model)
             self.embedding_model = HFCLIPModel.from_pretrained(embedding_model).to(device)
             self.embedding_model.eval()
+            if self.use_amp:
+                self.embedding_model = self.embedding_model.half()
             
             # Initialize empty index (will be built when videos are indexed)
             self.index = None
@@ -351,7 +387,7 @@ class FAISSIndex(EpisodicMemoryModel):
     def get_model_name(self) -> str:
         return self.model_name
     
-    def _extract_frames(self, video_path: str, num_frames: int = 32) -> Tuple[List[np.ndarray], float, int]:
+    def _extract_frames(self, video_path: str, num_frames: int = 64) -> Tuple[List[np.ndarray], float, int]:
         """Extract frames from video."""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -382,13 +418,15 @@ class FAISSIndex(EpisodicMemoryModel):
         frame_images = [Image.fromarray(frame) for frame in frames]
         inputs = self.processor(images=frame_images, return_tensors="pt", padding=True).to(self.device)
         
+        autocast_context = torch.cuda.amp.autocast(enabled=self.use_amp, dtype=torch.float16) if self.use_amp else torch.no_grad()
         with torch.no_grad():
-            embeddings = self.embedding_model.get_image_features(**inputs)
-            embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
+            with autocast_context:
+                embeddings = self.embedding_model.get_image_features(**inputs)
+                embeddings = embeddings / embeddings.norm(dim=-1, keepdim=True)
         
         return embeddings.cpu().numpy()
     
-    def build_index(self, video_paths: List[str], num_frames_per_video: int = 32) -> None:
+    def build_index(self, video_paths: List[str], num_frames_per_video: int = 64) -> None:
         """
         Build FAISS index from video collection.
         
@@ -460,11 +498,13 @@ class FAISSIndex(EpisodicMemoryModel):
         if self.index is None or len(self.video_metadata) == 0:
             return []
         
-        # Encode query
+        # Encode query with mixed precision
         query_inputs = self.processor(text=[query], return_tensors="pt", padding=True).to(self.device)
+        autocast_context = torch.cuda.amp.autocast(enabled=self.use_amp, dtype=torch.float16) if self.use_amp else torch.no_grad()
         with torch.no_grad():
-            query_embedding = self.embedding_model.get_text_features(**query_inputs)
-            query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
+            with autocast_context:
+                query_embedding = self.embedding_model.get_text_features(**query_inputs)
+                query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
         
         query_vector = query_embedding.cpu().numpy().astype('float32')
         
@@ -755,7 +795,7 @@ class MMAction2Model(EpisodicMemoryModel):
             results = self.inference_recognizer(self.model, video_path)
             
             # Extract frames and metadata
-            frames, fps, total_frames = self._extract_frames(video_path, num_frames=32)
+            frames, fps, total_frames = self._extract_frames(video_path, num_frames=64)
             if len(frames) == 0:
                 return []
             
@@ -835,16 +875,21 @@ class MMAction2Model(EpisodicMemoryModel):
 class PyTorchVideoModel(EpisodicMemoryModel):
     """PyTorchVideo model (SlowFast/MViT) for video-text retrieval."""
     
-    def __init__(self, device: str = "cuda", model_name: str = "slowfast"):
+    def __init__(self, device: str = "cuda", model_name: str = "slowfast", 
+                 use_amp: bool = True, num_frames: int = 64):
         """
         Initialize PyTorchVideo model.
         
         Args:
             device: Device to run model on ('cuda' or 'cpu').
             model_name: Model variant - 'slowfast' or 'mvit' (default: 'slowfast').
+            use_amp: Enable automatic mixed precision (FP16) for faster inference.
+            num_frames: Number of frames to extract per video (default: 64 for better GPU utilization).
         """
         self.device = device
         self.video_model_name = model_name.lower()
+        self.use_amp = use_amp and device == "cuda" and torch.cuda.is_available()
+        self.num_frames = num_frames
         
         if self.video_model_name == "slowfast":
             self.model_name = "PyTorchVideo-SlowFast"
@@ -866,6 +911,8 @@ class PyTorchVideoModel(EpisodicMemoryModel):
                 pretrained=True
             ).to(device)
             self.pytorchvideo_model.eval()
+            if self.use_amp:
+                self.pytorchvideo_model = self.pytorchvideo_model.half()
             
             # Store transforms for later use
             self.pytorchvideo_transforms = None
@@ -876,6 +923,8 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             self.clip_processor = CLIPProcessor.from_pretrained(clip_model_name)
             self.clip_model = HFCLIPModel.from_pretrained(clip_model_name).to(device)
             self.clip_model.eval()
+            if self.use_amp:
+                self.clip_model = self.clip_model.half()
             
             self.available = True
         except ImportError as e:
@@ -933,7 +982,7 @@ class PyTorchVideoModel(EpisodicMemoryModel):
     def get_model_name(self) -> str:
         return self.model_name
     
-    def _extract_frames(self, video_path: str, num_frames: int = 32) -> Tuple[List[np.ndarray], float, int]:
+    def _extract_frames(self, video_path: str, num_frames: int = 64) -> Tuple[List[np.ndarray], float, int]:
         """Extract frames from video and return metadata."""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
@@ -1223,28 +1272,36 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             return []
         
         # Extract frames using CLIP-based approach (same as CLIPModel)
-        frames, fps, total_frames = self._extract_frames(video_path, num_frames=32)
+        frames, fps, total_frames = self._extract_frames(video_path, num_frames=self.num_frames)
         if len(frames) == 0:
             return []
         
         duration = total_frames / fps if fps > 0 else len(frames) / 30.0
         
+        # Use mixed precision for faster inference
+        autocast_context = torch.cuda.amp.autocast(enabled=self.use_amp, dtype=torch.float16) if self.use_amp else torch.no_grad()
+        
         # Encode query using CLIP
         query_inputs = self.clip_processor(text=[query], return_tensors="pt", padding=True).to(self.device)
         with torch.no_grad():
-            query_embedding = self.clip_model.get_text_features(**query_inputs)
-            query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
+            with autocast_context:
+                query_embedding = self.clip_model.get_text_features(**query_inputs)
+                query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
         
         # Encode frames using CLIP (guaranteed 512-D embeddings)
         # PyTorchVideo models are NOT used for feature extraction to prevent positional-embedding errors
         frame_images = [Image.fromarray(frame) for frame in frames]
         frame_inputs = self.clip_processor(images=frame_images, return_tensors="pt", padding=True).to(self.device)
         with torch.no_grad():
-            frame_embeddings = self.clip_model.get_image_features(**frame_inputs)
-            frame_embeddings = frame_embeddings / frame_embeddings.norm(dim=-1, keepdim=True)
+            with autocast_context:
+                frame_embeddings = self.clip_model.get_image_features(**frame_inputs)
+                frame_embeddings = frame_embeddings / frame_embeddings.norm(dim=-1, keepdim=True)
         
         # Compute similarities (all features are guaranteed 512-D CLIP embeddings)
-        similarities = (frame_embeddings @ query_embedding.T).squeeze().cpu().numpy()
+        # Keep on GPU for better utilization
+        similarities_tensor = (frame_embeddings @ query_embedding.T).squeeze()
+        # Only move to CPU when needed for numpy operations
+        similarities = similarities_tensor.cpu().numpy()
         
         # Group frames into moments using sliding window (same approach as CLIPModel)
         window_size = max(4, len(frames) // 8)

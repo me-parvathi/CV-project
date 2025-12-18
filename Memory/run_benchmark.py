@@ -6,24 +6,52 @@ from data_processing import MECCANOLoader, DatasetLoader
 from models import MomentRetrievalModel, CLIPModel, FAISSIndex, MMAction2Model, PyTorchVideoModel, EpisodicMemoryModel
 from benchmark import BenchmarkRunner
 import time
+import os
+
+# GPU Optimization Settings
+def enable_gpu_optimizations():
+    """Enable GPU optimizations for better utilization."""
+    if torch.cuda.is_available():
+        # Enable cuDNN benchmarking for consistent input sizes
+        torch.backends.cudnn.benchmark = True
+        # Enable cuDNN deterministic mode (slower but reproducible)
+        # torch.backends.cudnn.deterministic = True
+        print("✓ GPU optimizations enabled:")
+        print(f"  - cuDNN benchmark: {torch.backends.cudnn.benchmark}")
+        print(f"  - GPU: {torch.cuda.get_device_name(0)}")
+        print(f"  - GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+    else:
+        print("⚠ GPU not available, optimizations skipped")
 
 
 def main():
     """Main function to run benchmarks."""
+    # Enable GPU optimizations
+    enable_gpu_optimizations()
+    
     # Detect device
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
+    if device == "cuda":
+        print(f"GPU Memory allocated: {torch.cuda.memory_allocated(0) / 1e9:.2f} GB")
     print("=" * 80)
     
     # Initialize models (skip unavailable ones)
-    print("Loading models...")
+    # Enable optimizations: mixed precision (FP16) and larger frame batches (64 frames)
+    use_amp = device == "cuda" and torch.cuda.is_available()
+    num_frames = 64  # Increased from 32 for better GPU utilization
+    
+    print("Loading models with GPU optimizations...")
+    print(f"  - Mixed Precision (FP16): {use_amp}")
+    print(f"  - Frame Batch Size: {num_frames}")
+    
     model_candidates = {
         "Moment-DETR": MomentRetrievalModel(device=device),
-        "CLIP": CLIPModel(device=device),
-        "FAISS": FAISSIndex(device=device),
+        "CLIP": CLIPModel(device=device, use_amp=use_amp, num_frames=num_frames),
+        "FAISS": FAISSIndex(device=device, use_amp=use_amp, num_frames=num_frames),
         "MMAction2": MMAction2Model(device=device),
-        "PyTorchVideo-SlowFast": PyTorchVideoModel(device=device, model_name="slowfast"),
-        "PyTorchVideo-MViT": PyTorchVideoModel(device=device, model_name="mvit")
+        "PyTorchVideo-SlowFast": PyTorchVideoModel(device=device, model_name="slowfast", use_amp=use_amp, num_frames=num_frames),
+        "PyTorchVideo-MViT": PyTorchVideoModel(device=device, model_name="mvit", use_amp=use_amp, num_frames=num_frames)
     }
     
     models = {}
@@ -89,8 +117,10 @@ def main():
                 del models["FAISS"]
                 print("FAISS model removed from benchmark")
     
-    # Initialize benchmark runner
-    benchmark = BenchmarkRunner(models)
+    # Initialize benchmark runner with batch processing for better GPU utilization
+    batch_size = int(os.getenv("BATCH_SIZE", "4"))  # Default batch size: 4
+    benchmark = BenchmarkRunner(models, batch_size=batch_size)
+    print(f"Benchmark runner initialized with batch size: {batch_size}")
     
     # Run benchmark
     print("\n" + "=" * 80)

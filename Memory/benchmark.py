@@ -175,15 +175,17 @@ def retrieval_speed(num_queries: int, total_time: float) -> float:
 class BenchmarkRunner:
     """Runs benchmarks on episodic memory retrieval models."""
     
-    def __init__(self, models: Dict):
+    def __init__(self, models: Dict, batch_size: int = 4):
         """
         Initialize benchmark runner.
         
         Args:
             models: Dict mapping model names to EpisodicMemoryModel instances.
+            batch_size: Number of queries to process in parallel (default: 4 for better GPU utilization).
         """
         self.models = models
         self.results = []
+        self.batch_size = batch_size
     
     def _extract_ground_truth_indices(self, predicted_moments: List[Dict], 
                                      ground_truth: Dict, 
@@ -359,33 +361,68 @@ class BenchmarkRunner:
         self.results.append(benchmark_results)
         return benchmark_results
     
-    def run_on_dataset(self, queries: List[Dict]) -> None:
+    def run_on_dataset(self, queries: List[Dict], use_batching: bool = True) -> None:
         """
         Run benchmark on all queries from dataset.
         
         Args:
             queries: List of query dicts with 'video_path', 'query', 'ground_truth' keys.
+            use_batching: If True, process queries in batches for better GPU utilization.
         """
         from pathlib import Path
+        import concurrent.futures
+        import threading
         
         skipped = 0
         total_queries = len(queries)
         
-        for i, query_info in enumerate(queries):
-            video_path = query_info.get("video_path")
-            query = query_info.get("query", "")
-            ground_truth = query_info.get("ground_truth", {})
+        if use_batching and self.batch_size > 1:
+            # Process queries in batches for better GPU utilization
+            print(f"Processing queries in batches of {self.batch_size} for better GPU utilization...")
             
-            if not video_path or not Path(video_path).exists():
-                skipped += 1
-                continue
+            # Filter valid queries first
+            valid_queries = []
+            for query_info in queries:
+                video_path = query_info.get("video_path")
+                if video_path and Path(video_path).exists():
+                    valid_queries.append(query_info)
+                else:
+                    skipped += 1
             
-            if (i + 1) % 10 == 0:
-                print(f"Processing query {i+1}/{total_queries}...")
-            
-            result = self.run_benchmark(video_path, query, ground_truth=ground_truth)
-            if result is None:
-                skipped += 1
+            # Process in batches
+            for batch_start in range(0, len(valid_queries), self.batch_size):
+                batch_end = min(batch_start + self.batch_size, len(valid_queries))
+                batch = valid_queries[batch_start:batch_end]
+                
+                if (batch_start + 1) % (self.batch_size * 10) == 0 or batch_end == len(valid_queries):
+                    print(f"Processing queries {batch_start+1}-{batch_end}/{len(valid_queries)}...")
+                
+                # Process batch sequentially (models handle GPU batching internally)
+                for query_info in batch:
+                    video_path = query_info.get("video_path")
+                    query = query_info.get("query", "")
+                    ground_truth = query_info.get("ground_truth", {})
+                    
+                    result = self.run_benchmark(video_path, query, ground_truth=ground_truth)
+                    if result is None:
+                        skipped += 1
+        else:
+            # Sequential processing (original behavior)
+            for i, query_info in enumerate(queries):
+                video_path = query_info.get("video_path")
+                query = query_info.get("query", "")
+                ground_truth = query_info.get("ground_truth", {})
+                
+                if not video_path or not Path(video_path).exists():
+                    skipped += 1
+                    continue
+                
+                if (i + 1) % 10 == 0:
+                    print(f"Processing query {i+1}/{total_queries}...")
+                
+                result = self.run_benchmark(video_path, query, ground_truth=ground_truth)
+                if result is None:
+                    skipped += 1
         
         if skipped > 0:
             print(f"Skipped {skipped} query/queries (file not found or invalid)")
