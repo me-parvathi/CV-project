@@ -7,6 +7,67 @@ import json
 import re
 import pandas as pd
 import cv2
+import torch
+import torch.nn.functional as F
+
+
+def resize_video_tensor(video: torch.Tensor, target_size: tuple = (224, 224)) -> torch.Tensor:
+    """
+    Resize video tensor spatial dimensions to target size.
+    
+    This function resizes the spatial dimensions (H, W) of a video tensor
+    to the model's expected resolution (typically 224x224) to avoid
+    positional embedding mismatch errors.
+    
+    Args:
+        video: Video tensor of shape [B, C, T, H, W] or [C, T, H, W]
+        target_size: Target spatial size as (height, width). Default: (224, 224)
+        
+    Returns:
+        Resized video tensor with same shape except H and W are resized to target_size
+    """
+    if not isinstance(video, torch.Tensor):
+        raise TypeError(f"Expected torch.Tensor, got {type(video)}")
+    
+    original_shape = video.shape
+    original_ndim = len(original_shape)
+    
+    # Handle different input shapes
+    if original_ndim == 4:
+        # Shape: [C, T, H, W] - add batch dimension temporarily
+        video = video.unsqueeze(0)
+        added_batch = True
+    elif original_ndim == 5:
+        # Shape: [B, C, T, H, W] - already has batch dimension
+        added_batch = False
+    else:
+        raise ValueError(f"Expected 4D [C, T, H, W] or 5D [B, C, T, H, W] tensor, got shape {original_shape}")
+    
+    B, C, T, H, W = video.shape
+    
+    # Reshape to [B*T, C, H, W] for batch processing
+    video_reshaped = video.permute(0, 2, 1, 3, 4).contiguous()  # [B, T, C, H, W]
+    video_reshaped = video_reshaped.view(B * T, C, H, W)  # [B*T, C, H, W]
+    
+    # Resize spatial dimensions
+    video_resized = F.interpolate(
+        video_reshaped,
+        size=target_size,
+        mode='bilinear',
+        align_corners=False
+    )  # [B*T, C, target_H, target_W]
+    
+    # Reshape back to [B, T, C, target_H, target_W]
+    video_resized = video_resized.view(B, T, C, target_size[0], target_size[1])
+    
+    # Permute back to [B, C, T, target_H, target_W]
+    video_resized = video_resized.permute(0, 2, 1, 3, 4).contiguous()
+    
+    # Remove batch dimension if it was added
+    if added_batch:
+        video_resized = video_resized.squeeze(0)  # [C, T, target_H, target_W]
+    
+    return video_resized
 
 
 class DatasetLoader(ABC):

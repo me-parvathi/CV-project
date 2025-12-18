@@ -8,6 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import cv2
 from PIL import Image
+from data_processing import resize_video_tensor
 
 
 class EpisodicMemoryModel(ABC):
@@ -1066,6 +1067,10 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             # Ensure channels are in position 1
             if len(video_tensor.shape) == 5 and video_tensor.shape[2] == 3:
                 video_tensor = video_tensor.permute(0, 2, 1, 3, 4)
+        
+        # Resize spatial dimensions to 224x224 to match model's expected resolution
+        # This avoids positional embedding mismatch errors
+        video_tensor = resize_video_tensor(video_tensor, target_size=(224, 224))
         
         video_tensor = video_tensor.to(self.device)
         
