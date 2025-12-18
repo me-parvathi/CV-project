@@ -1071,72 +1071,65 @@ class PyTorchVideoModel(EpisodicMemoryModel):
         
         # Extract features
         with torch.no_grad():
-            # PyTorchVideo models from torch.hub - try different input formats
-            # Some models expect single tensor, others expect list for SlowFast
-            model_input = video_tensor
+            # PyTorchVideo models from torch.hub - handle SlowFast specially
             output = None
             last_error = None
             
-            # Try 1: Single tensor input (most common)
-            try:
-                output = self.pytorchvideo_model(model_input)
-            except Exception as e1:
-                last_error = e1
-                error_msg = str(e1)
+            if self.video_model_name == "slowfast":
+                # SlowFast model expects a list of two tensors:
+                # - slow_pathway: [B, C, 8, H, W] - 8 frames
+                # - fast_pathway: [B, C, 32, H, W] - 32 frames (4x slow)
+                # We need to create these pathways with exact frame counts
                 
-                # If error mentions "list" or "tensor number", model might expect list input
-                if "list" in error_msg.lower() or "tensor number" in error_msg.lower() or "Sizes of tensors must match" in error_msg:
-                    # Try 2: List input for SlowFast dual-pathway
-                    if self.video_model_name == "slowfast" and len(video_tensor.shape) == 5:
-                        B, C, T, H, W = video_tensor.shape
-                        
-                        # For SlowFast, we need to ensure both pathways have compatible shapes
-                        # Slow pathway should have T/8 frames, but we need at least 1
-                        # Fast pathway has T frames
-                        # The model expects them to have same B, C, H, W but different T
-                        
-                        # Create slow pathway: sample every 8th frame, but ensure we have at least 1
-                        slow_T = max(1, T // 8)  # At least 1 frame for slow pathway
-                        slow_indices = torch.linspace(0, T - 1, slow_T, device=self.device, dtype=torch.long)
-                        slow_pathway = video_tensor.index_select(2, slow_indices)
-                        
-                        # Fast pathway: use all frames
-                        fast_pathway = video_tensor
-                        
-                        # Ensure both have same batch, channel, height, width
-                        # They should already match, but verify
-                        assert slow_pathway.shape[0] == fast_pathway.shape[0], f"Batch mismatch: {slow_pathway.shape[0]} vs {fast_pathway.shape[0]}"
-                        assert slow_pathway.shape[1] == fast_pathway.shape[1], f"Channel mismatch: {slow_pathway.shape[1]} vs {fast_pathway.shape[1]}"
-                        assert slow_pathway.shape[3] == fast_pathway.shape[3], f"Height mismatch: {slow_pathway.shape[3]} vs {fast_pathway.shape[3]}"
-                        assert slow_pathway.shape[4] == fast_pathway.shape[4], f"Width mismatch: {slow_pathway.shape[4]} vs {fast_pathway.shape[4]}"
-                        
-                        # Try with list input
-                        try:
-                            model_input = [slow_pathway, fast_pathway]
-                            output = self.pytorchvideo_model(model_input)
-                        except Exception as e2:
-                            last_error = e2
-                            # Try 3: Ensure slow pathway has at least 2 frames if fast has more
-                            if slow_pathway.shape[2] == 1 and fast_pathway.shape[2] > 1:
-                                # Repeat the single frame to match temporal structure
-                                slow_pathway = slow_pathway.repeat(1, 1, min(2, fast_pathway.shape[2]), 1, 1)
-                                try:
-                                    model_input = [slow_pathway, fast_pathway]
-                                    output = self.pytorchvideo_model(model_input)
-                                except Exception as e3:
-                                    last_error = e3
-                                    # Try 4: Same tensor for both pathways (fallback)
-                                    try:
-                                        model_input = [video_tensor, video_tensor]
-                                        output = self.pytorchvideo_model(model_input)
-                                    except Exception as e4:
-                                        last_error = e4
-                                        raise RuntimeError(f"Failed to extract features with multiple input formats. Last error: {last_error}")
-                            else:
-                                raise RuntimeError(f"Failed to extract features. Error: {last_error}")
+                B, C, T, H, W = video_tensor.shape
+                
+                # Target frame counts for slowfast_r50
+                slow_frames = 8
+                fast_frames = 32
+                
+                # Create slow pathway with exactly 8 frames
+                if T >= slow_frames:
+                    # Sample 8 frames uniformly
+                    slow_indices = torch.linspace(0, T - 1, slow_frames, device=self.device, dtype=torch.long)
+                    slow_pathway = video_tensor.index_select(2, slow_indices)
                 else:
-                    # Other error, re-raise
-                    raise
+                    # Not enough frames, repeat to get 8
+                    repeat_factor = (slow_frames + T - 1) // T
+                    repeated = video_tensor.repeat(1, 1, repeat_factor, 1, 1)
+                    slow_indices = torch.linspace(0, repeated.shape[2] - 1, slow_frames, device=self.device, dtype=torch.long)
+                    slow_pathway = repeated.index_select(2, slow_indices)
+                
+                # Create fast pathway with exactly 32 frames
+                if T >= fast_frames:
+                    # Sample 32 frames uniformly
+                    fast_indices = torch.linspace(0, T - 1, fast_frames, device=self.device, dtype=torch.long)
+                    fast_pathway = video_tensor.index_select(2, fast_indices)
+                else:
+                    # Not enough frames, repeat to get 32
+                    repeat_factor = (fast_frames + T - 1) // T
+                    repeated = video_tensor.repeat(1, 1, repeat_factor, 1, 1)
+                    fast_indices = torch.linspace(0, repeated.shape[2] - 1, fast_frames, device=self.device, dtype=torch.long)
+                    fast_pathway = repeated.index_select(2, fast_indices)
+                
+                # Verify shapes
+                assert slow_pathway.shape == (B, C, slow_frames, H, W), f"Slow pathway shape mismatch: {slow_pathway.shape}"
+                assert fast_pathway.shape == (B, C, fast_frames, H, W), f"Fast pathway shape mismatch: {fast_pathway.shape}"
+                
+                # Pass as list [slow, fast] to model
+                model_input = [slow_pathway, fast_pathway]
+                try:
+                    output = self.pytorchvideo_model(model_input)
+                except Exception as e:
+                    last_error = e
+                    raise RuntimeError(f"SlowFast model failed with slow={slow_pathway.shape}, fast={fast_pathway.shape}: {e}")
+            
+            else:
+                # For MViT and other models, use single tensor input
+                try:
+                    output = self.pytorchvideo_model(video_tensor)
+                except Exception as e:
+                    last_error = e
+                    raise RuntimeError(f"Model failed with input shape {video_tensor.shape}: {e}")
             
             if output is None:
                 raise RuntimeError(f"Failed to extract features. Last error: {last_error}")
@@ -1263,8 +1256,14 @@ class PyTorchVideoModel(EpisodicMemoryModel):
         if not Path(video_path).exists():
             return []
         
-        # Extract frames
-        frames, fps, total_frames = self._extract_frames(video_path, num_frames=32)
+        # Extract frames - for SlowFast we need at least 32 frames per segment
+        # Extract more frames to allow for sliding window with 32-frame segments
+        if self.video_model_name == "slowfast":
+            num_frames_to_extract = 64  # Extract more frames for SlowFast
+        else:
+            num_frames_to_extract = 32
+        
+        frames, fps, total_frames = self._extract_frames(video_path, num_frames=num_frames_to_extract)
         if len(frames) == 0:
             return []
         
@@ -1277,7 +1276,11 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
         
         # Extract video features for frame segments using sliding window
-        window_size = max(8, len(frames) // 4)  # Adaptive window size
+        # For SlowFast, use 32-frame windows (fast pathway needs 32 frames)
+        if self.video_model_name == "slowfast":
+            window_size = min(32, len(frames))  # SlowFast needs 32 frames for fast pathway
+        else:
+            window_size = max(8, len(frames) // 4)  # Adaptive window size
         stride = max(1, window_size // 2)
         
         segment_features = []
