@@ -8,6 +8,8 @@ from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import cv2
 from PIL import Image
+# NOTE: resize_video_tensor is only used in deprecated _extract_video_features method
+# It is not used for similarity search (CLIP-only architecture)
 from data_processing import resize_video_tensor
 
 
@@ -171,74 +173,23 @@ class MomentRetrievalModel(EpisodicMemoryModel):
         return moments[:top_k]
     
     def retrieve_moments(self, video_path: str, query: str, top_k: int = 5) -> List[Dict]:
-        """Retrieve moments using Moment-DETR or CLIP fallback."""
+        """Retrieve moments using CLIP-based retrieval (Moment-DETR bypassed)."""
         if not Path(video_path).exists():
             return []
         
-        if not self.available or (hasattr(self, 'use_clip_fallback') and self.use_clip_fallback):
-            return self._clip_based_retrieval(video_path, query, top_k)
+        # Immediately use CLIP-based retrieval - Moment-DETR bypassed
+        # Moment-DETR is never called to prevent positional-embedding shape errors
+        return self._clip_based_retrieval(video_path, query, top_k)
         
-        try:
-            # Extract frames
-            frames = self._extract_frames(video_path, num_frames=16)
-            if len(frames) == 0:
-                return []
-            
-            # Get video metadata
-            cap = cv2.VideoCapture(video_path)
-            fps = cap.get(cv2.CAP_PROP_FPS) if cap.isOpened() else 30.0
-            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) if cap.isOpened() else len(frames)
-            if cap.isOpened():
-                cap.release()
-            
-            # Prepare inputs for Moment-DETR
-            frame_images = [Image.fromarray(frame) for frame in frames]
-            inputs = self.processor(
-                text=[query],
-                videos=[frame_images],
-                return_tensors="pt",
-                padding=True
-            ).to(self.device)
-            
-            # Run inference
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-            
-            # Extract predictions
-            # Moment-DETR typically returns temporal boundaries
-            # Note: Actual output format may vary based on model version
-            if hasattr(outputs, 'pred_boxes') or hasattr(outputs, 'logits'):
-                # Process outputs to get temporal segments
-                # This is a simplified version - actual implementation depends on model output format
-                moments = []
-                
-                # If model returns logits or scores, extract top segments
-                if hasattr(outputs, 'logits'):
-                    logits = outputs.logits.cpu().numpy()
-                    # Extract top segments (simplified)
-                    for i in range(min(top_k, len(logits))):
-                        # This is a placeholder - actual parsing depends on model output
-                        start_time = i * (total_frames / fps / len(logits))
-                        end_time = (i + 1) * (total_frames / fps / len(logits))
-                        score = float(logits[i]) if isinstance(logits[i], (int, float, np.number)) else 0.5
-                        
-                        moments.append({
-                            "start_time": start_time,
-                            "end_time": end_time,
-                            "start_frame": int(start_time * fps),
-                            "end_frame": int(end_time * fps),
-                            "score": score,
-                            "model_name": self.model_name
-                        })
-                
-                return moments[:top_k] if moments else self._clip_based_retrieval(video_path, query, top_k)
-            else:
-                # Fallback to CLIP if output format is unexpected
-                return self._clip_based_retrieval(video_path, query, top_k)
-        
-        except Exception as e:
-            print(f"Error in Moment-DETR retrieval: {e}")
-            return self._clip_based_retrieval(video_path, query, top_k)
+        # NOTE: All Moment-DETR processing code has been removed/commented out below
+        # Moment-DETR model will never receive video tensors to eliminate positional-embedding mismatches
+        # 
+        # Previously attempted Moment-DETR code:
+        # - Frame extraction for Moment-DETR
+        # - self.processor(...) calls
+        # - self.model(**inputs) calls
+        # - Moment-DETR output processing
+        # All removed to enforce CLIP-only feature extraction architecture
 
 
 class CLIPModel(EpisodicMemoryModel):
@@ -1010,7 +961,17 @@ class PyTorchVideoModel(EpisodicMemoryModel):
         return frames, fps, total_frames
     
     def _extract_video_features(self, frames: List[np.ndarray]) -> torch.Tensor:
-        """Extract video features using PyTorchVideo model."""
+        """
+        DEPRECATED: This method is no longer used for similarity search.
+        
+        Extract video features using PyTorchVideo model.
+        
+        NOTE: This method is kept for optional metadata extraction only, not for similarity search.
+        PyTorchVideo models are NOT used as feature backbones for similarity search to prevent
+        positional-embedding shape errors. All similarity computations now use CLIP embeddings (512-D).
+        
+        This method may be removed in future versions.
+        """
         # Convert frames to tensor format expected by PyTorchVideo
         # Frames should be in shape (T, H, W, C) -> (T, C, H, W)
         frame_tensors = []
@@ -1254,21 +1215,15 @@ class PyTorchVideoModel(EpisodicMemoryModel):
         return features  # Return (512,) tensor
     
     def retrieve_moments(self, video_path: str, query: str, top_k: int = 5) -> List[Dict]:
-        """Retrieve moments using PyTorchVideo features and CLIP text matching."""
+        """Retrieve moments using CLIP-based feature extraction (PyTorchVideo bypassed for similarity search)."""
         if not self.available:
             raise RuntimeError(f"PyTorchVideo model unavailable: {self.error}")
         
         if not Path(video_path).exists():
             return []
         
-        # Extract frames - for SlowFast we need at least 32 frames per segment
-        # Extract more frames to allow for sliding window with 32-frame segments
-        if self.video_model_name == "slowfast":
-            num_frames_to_extract = 64  # Extract more frames for SlowFast
-        else:
-            num_frames_to_extract = 32
-        
-        frames, fps, total_frames = self._extract_frames(video_path, num_frames=num_frames_to_extract)
+        # Extract frames using CLIP-based approach (same as CLIPModel)
+        frames, fps, total_frames = self._extract_frames(video_path, num_frames=32)
         if len(frames) == 0:
             return []
         
@@ -1280,129 +1235,37 @@ class PyTorchVideoModel(EpisodicMemoryModel):
             query_embedding = self.clip_model.get_text_features(**query_inputs)
             query_embedding = query_embedding / query_embedding.norm(dim=-1, keepdim=True)
         
-        # Extract video features for frame segments using sliding window
-        # For SlowFast, use 32-frame windows (fast pathway needs 32 frames)
-        if self.video_model_name == "slowfast":
-            window_size = min(32, len(frames))  # SlowFast needs 32 frames for fast pathway
-        else:
-            window_size = max(8, len(frames) // 4)  # Adaptive window size
-        stride = max(1, window_size // 2)
+        # Encode frames using CLIP (guaranteed 512-D embeddings)
+        # PyTorchVideo models are NOT used for feature extraction to prevent positional-embedding errors
+        frame_images = [Image.fromarray(frame) for frame in frames]
+        frame_inputs = self.clip_processor(images=frame_images, return_tensors="pt", padding=True).to(self.device)
+        with torch.no_grad():
+            frame_embeddings = self.clip_model.get_image_features(**frame_inputs)
+            frame_embeddings = frame_embeddings / frame_embeddings.norm(dim=-1, keepdim=True)
         
-        segment_features = []
-        segment_indices = []
+        # Compute similarities (all features are guaranteed 512-D CLIP embeddings)
+        similarities = (frame_embeddings @ query_embedding.T).squeeze().cpu().numpy()
         
-        for i in range(0, len(frames) - window_size + 1, stride):
-            segment_frames = frames[i:i+window_size]
-            try:
-                segment_feature = self._extract_video_features(segment_frames)
-                
-                # Validate feature shape immediately after extraction
-                if not isinstance(segment_feature, torch.Tensor):
-                    print(f"Warning: Segment {i} returned non-tensor: {type(segment_feature)}")
-                    continue
-                
-                # Ensure feature is 1D and has correct size
-                if len(segment_feature.shape) == 0:
-                    segment_feature = segment_feature.unsqueeze(0)
-                elif len(segment_feature.shape) > 1:
-                    segment_feature = segment_feature.view(-1)
-                
-                # Validate size
-                if segment_feature.shape[0] != 512:
-                    print(f"Warning: Segment {i} has incorrect size {segment_feature.shape[0]}, expected 512. Fixing...")
-                    if segment_feature.shape[0] < 512:
-                        padding = torch.zeros(512 - segment_feature.shape[0],
-                                            device=segment_feature.device, dtype=segment_feature.dtype)
-                        segment_feature = torch.cat([segment_feature, padding])
-                    else:
-                        segment_feature = segment_feature[:512]
-                
-                segment_features.append(segment_feature)
-                segment_indices.append((i, min(i + window_size, len(frames))))
-            except Exception as e:
-                # Skip segment if feature extraction fails
-                print(f"Warning: Failed to extract features for segment {i}: {e}")
-                continue
-        
-        if len(segment_features) == 0:
-            return []
-        
-        # CRITICAL FIX: Ensure all features have the same shape before stacking
-        # Double-check all features are properly normalized
-        normalized_features = []
-        target_size = 512  # Should match the target_size in _extract_video_features
-        
-        for idx, feat in enumerate(segment_features):
-            try:
-                # Ensure feature is a tensor
-                if not isinstance(feat, torch.Tensor):
-                    print(f"Warning: Feature {idx} is not a tensor, skipping")
-                    continue
-                
-                # Ensure feature is 1D
-                if len(feat.shape) > 1:
-                    feat = feat.view(-1)
-                elif len(feat.shape) == 0:
-                    feat = feat.unsqueeze(0)
-                
-                current_size = feat.shape[0]
-                
-                # Validate and fix size
-                if current_size != target_size:
-                    if current_size < target_size:
-                        # Pad with zeros
-                        padding = torch.zeros(target_size - current_size, 
-                                            device=feat.device, dtype=feat.dtype)
-                        feat = torch.cat([feat, padding])
-                    elif current_size > target_size:
-                        # Truncate (shouldn't happen if _extract_video_features works correctly)
-                        feat = feat[:target_size]
-                
-                # Final validation
-                if feat.shape[0] != target_size:
-                    print(f"Warning: Feature {idx} still has incorrect size after normalization: {feat.shape[0]}")
-                    continue
-                
-                normalized_features.append(feat)
-            except Exception as e:
-                print(f"Warning: Error normalizing feature {idx}: {e}")
-                continue
-        
-        if len(normalized_features) == 0:
-            print("Warning: No valid features after normalization")
-            return []
-        
-        # Validate all features have same shape before stacking
-        first_shape = normalized_features[0].shape
-        for idx, feat in enumerate(normalized_features):
-            if feat.shape != first_shape:
-                print(f"Warning: Feature {idx} shape {feat.shape} doesn't match first feature shape {first_shape}")
-                # Force to match
-                if feat.shape[0] != first_shape[0]:
-                    if feat.shape[0] < first_shape[0]:
-                        padding = torch.zeros(first_shape[0] - feat.shape[0],
-                                            device=feat.device, dtype=feat.dtype)
-                        feat = torch.cat([feat, padding])
-                    else:
-                        feat = feat[:first_shape[0]]
-                normalized_features[idx] = feat
-        
-        # Stack features and compute similarities
-        try:
-            segment_features_tensor = torch.stack(normalized_features).to(self.device)
-        except Exception as e:
-            print(f"Error stacking features: {e}")
-            print(f"Feature shapes: {[f.shape for f in normalized_features]}")
-            return []
-        similarities = (segment_features_tensor @ query_embedding.T).squeeze().cpu().numpy()
-        
-        # Convert to moments
+        # Group frames into moments using sliding window (same approach as CLIPModel)
+        window_size = max(4, len(frames) // 8)
         moments = []
-        for (start_idx, end_idx), score in zip(segment_indices, similarities):
-            start_frame = int((start_idx / len(frames)) * total_frames)
-            end_frame = int((end_idx / len(frames)) * total_frames)
-            start_time = start_frame / fps if fps > 0 else (start_idx / len(frames)) * duration
-            end_time = end_frame / fps if fps > 0 else (end_idx / len(frames)) * duration
+        
+        for i in range(0, len(frames) - window_size + 1, max(1, window_size // 2)):
+            window_similarities = similarities[i:i+window_size]
+            avg_score = np.mean(window_similarities)
+            max_score = np.max(window_similarities)
+            
+            # Use weighted score
+            score = 0.7 * avg_score + 0.3 * max_score
+            
+            start_frame_idx = i
+            end_frame_idx = min(i + window_size, len(frames) - 1)
+            
+            # Convert to actual frame numbers and times
+            start_frame = int((start_frame_idx / len(frames)) * total_frames)
+            end_frame = int((end_frame_idx / len(frames)) * total_frames)
+            start_time = start_frame / fps if fps > 0 else (start_frame_idx / len(frames)) * duration
+            end_time = end_frame / fps if fps > 0 else (end_frame_idx / len(frames)) * duration
             
             moments.append({
                 "start_time": float(start_time),
