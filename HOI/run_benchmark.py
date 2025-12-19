@@ -89,6 +89,12 @@ def main():
                 else:
                     acc_agg[col] = ['mean', 'std']
             print(report.groupby('model').agg(acc_agg).round(3))
+        
+        # Print HOI benchmark table
+        hoi_table = benchmark.generate_hoi_report()
+        if hoi_table is not None:
+            print("\n=== Hand–Object Interaction (HOI) Benchmark ===")
+            print(hoi_table)
     else:
         print("No benchmark results to summarize.")
 
