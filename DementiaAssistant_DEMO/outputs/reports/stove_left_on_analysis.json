@@ -1,0 +1,600 @@
+{
+  "scenario": "stove_left_on",
+  "total_frames": 1350,
+  "duration_sec": 45.0,
+  "detections_count": 270,
+  "memories_count": 270,
+  "alerts_count": 118,
+  "alerts": [
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 20 seconds!",
+      "timestamp": "2025-12-19T04:11:45.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 20 seconds!",
+      "timestamp": "2025-12-19T04:11:45.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 20 seconds!",
+      "timestamp": "2025-12-19T04:11:45.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 20 seconds!",
+      "timestamp": "2025-12-19T04:11:46.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 20 seconds!",
+      "timestamp": "2025-12-19T04:11:46.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 21 seconds!",
+      "timestamp": "2025-12-19T04:11:46.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 21 seconds!",
+      "timestamp": "2025-12-19T04:11:46.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 21 seconds!",
+      "timestamp": "2025-12-19T04:11:46.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 21 seconds!",
+      "timestamp": "2025-12-19T04:11:46.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 21 seconds!",
+      "timestamp": "2025-12-19T04:11:47.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 21 seconds!",
+      "timestamp": "2025-12-19T04:11:47.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 22 seconds!",
+      "timestamp": "2025-12-19T04:11:47.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 22 seconds!",
+      "timestamp": "2025-12-19T04:11:47.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 22 seconds!",
+      "timestamp": "2025-12-19T04:11:47.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 22 seconds!",
+      "timestamp": "2025-12-19T04:11:47.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 22 seconds!",
+      "timestamp": "2025-12-19T04:11:48.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 22 seconds!",
+      "timestamp": "2025-12-19T04:11:48.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 23 seconds!",
+      "timestamp": "2025-12-19T04:11:48.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 23 seconds!",
+      "timestamp": "2025-12-19T04:11:48.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 23 seconds!",
+      "timestamp": "2025-12-19T04:11:48.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 23 seconds!",
+      "timestamp": "2025-12-19T04:11:48.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 23 seconds!",
+      "timestamp": "2025-12-19T04:11:49.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 23 seconds!",
+      "timestamp": "2025-12-19T04:11:49.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 24 seconds!",
+      "timestamp": "2025-12-19T04:11:49.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 24 seconds!",
+      "timestamp": "2025-12-19T04:11:49.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 24 seconds!",
+      "timestamp": "2025-12-19T04:11:49.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 24 seconds!",
+      "timestamp": "2025-12-19T04:11:49.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 24 seconds!",
+      "timestamp": "2025-12-19T04:11:50.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 24 seconds!",
+      "timestamp": "2025-12-19T04:11:50.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 25 seconds!",
+      "timestamp": "2025-12-19T04:11:50.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 25 seconds!",
+      "timestamp": "2025-12-19T04:11:50.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 25 seconds!",
+      "timestamp": "2025-12-19T04:11:50.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 25 seconds!",
+      "timestamp": "2025-12-19T04:11:50.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 25 seconds!",
+      "timestamp": "2025-12-19T04:11:51.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 25 seconds!",
+      "timestamp": "2025-12-19T04:11:51.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 26 seconds!",
+      "timestamp": "2025-12-19T04:11:51.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 26 seconds!",
+      "timestamp": "2025-12-19T04:11:51.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 26 seconds!",
+      "timestamp": "2025-12-19T04:11:51.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 26 seconds!",
+      "timestamp": "2025-12-19T04:11:51.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 26 seconds!",
+      "timestamp": "2025-12-19T04:11:52.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 26 seconds!",
+      "timestamp": "2025-12-19T04:11:52.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 27 seconds!",
+      "timestamp": "2025-12-19T04:11:52.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 27 seconds!",
+      "timestamp": "2025-12-19T04:11:52.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 27 seconds!",
+      "timestamp": "2025-12-19T04:11:52.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 27 seconds!",
+      "timestamp": "2025-12-19T04:11:52.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 27 seconds!",
+      "timestamp": "2025-12-19T04:11:53.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 27 seconds!",
+      "timestamp": "2025-12-19T04:11:53.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 28 seconds!",
+      "timestamp": "2025-12-19T04:11:53.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 28 seconds!",
+      "timestamp": "2025-12-19T04:11:53.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 28 seconds!",
+      "timestamp": "2025-12-19T04:11:53.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 28 seconds!",
+      "timestamp": "2025-12-19T04:11:53.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 28 seconds!",
+      "timestamp": "2025-12-19T04:11:54.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 28 seconds!",
+      "timestamp": "2025-12-19T04:11:54.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 29 seconds!",
+      "timestamp": "2025-12-19T04:11:54.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 29 seconds!",
+      "timestamp": "2025-12-19T04:11:54.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 29 seconds!",
+      "timestamp": "2025-12-19T04:11:54.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 29 seconds!",
+      "timestamp": "2025-12-19T04:11:54.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 29 seconds!",
+      "timestamp": "2025-12-19T04:11:55.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 29 seconds!",
+      "timestamp": "2025-12-19T04:11:55.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 30 seconds!",
+      "timestamp": "2025-12-19T04:11:55.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 30 seconds!",
+      "timestamp": "2025-12-19T04:11:55.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 30 seconds!",
+      "timestamp": "2025-12-19T04:11:55.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 30 seconds!",
+      "timestamp": "2025-12-19T04:11:55.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 30 seconds!",
+      "timestamp": "2025-12-19T04:11:56.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 30 seconds!",
+      "timestamp": "2025-12-19T04:11:56.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 31 seconds!",
+      "timestamp": "2025-12-19T04:11:56.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 31 seconds!",
+      "timestamp": "2025-12-19T04:11:56.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 31 seconds!",
+      "timestamp": "2025-12-19T04:11:56.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 31 seconds!",
+      "timestamp": "2025-12-19T04:11:56.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 31 seconds!",
+      "timestamp": "2025-12-19T04:11:57.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 31 seconds!",
+      "timestamp": "2025-12-19T04:11:57.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 32 seconds!",
+      "timestamp": "2025-12-19T04:11:57.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 32 seconds!",
+      "timestamp": "2025-12-19T04:11:57.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 32 seconds!",
+      "timestamp": "2025-12-19T04:11:57.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 32 seconds!",
+      "timestamp": "2025-12-19T04:11:57.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 32 seconds!",
+      "timestamp": "2025-12-19T04:11:58.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 32 seconds!",
+      "timestamp": "2025-12-19T04:11:58.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 33 seconds!",
+      "timestamp": "2025-12-19T04:11:58.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 33 seconds!",
+      "timestamp": "2025-12-19T04:11:58.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 33 seconds!",
+      "timestamp": "2025-12-19T04:11:58.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 33 seconds!",
+      "timestamp": "2025-12-19T04:11:58.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 33 seconds!",
+      "timestamp": "2025-12-19T04:11:59.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 33 seconds!",
+      "timestamp": "2025-12-19T04:11:59.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 34 seconds!",
+      "timestamp": "2025-12-19T04:11:59.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 34 seconds!",
+      "timestamp": "2025-12-19T04:11:59.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 34 seconds!",
+      "timestamp": "2025-12-19T04:11:59.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 34 seconds!",
+      "timestamp": "2025-12-19T04:11:59.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 34 seconds!",
+      "timestamp": "2025-12-19T04:12:00.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 34 seconds!",
+      "timestamp": "2025-12-19T04:12:00.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 35 seconds!",
+      "timestamp": "2025-12-19T04:12:00.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 35 seconds!",
+      "timestamp": "2025-12-19T04:12:00.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 35 seconds!",
+      "timestamp": "2025-12-19T04:12:00.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 35 seconds!",
+      "timestamp": "2025-12-19T04:12:00.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 35 seconds!",
+      "timestamp": "2025-12-19T04:12:01.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 35 seconds!",
+      "timestamp": "2025-12-19T04:12:01.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 36 seconds!",
+      "timestamp": "2025-12-19T04:12:01.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 36 seconds!",
+      "timestamp": "2025-12-19T04:12:01.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 36 seconds!",
+      "timestamp": "2025-12-19T04:12:01.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 36 seconds!",
+      "timestamp": "2025-12-19T04:12:01.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 36 seconds!",
+      "timestamp": "2025-12-19T04:12:02.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 36 seconds!",
+      "timestamp": "2025-12-19T04:12:02.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 37 seconds!",
+      "timestamp": "2025-12-19T04:12:02.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 37 seconds!",
+      "timestamp": "2025-12-19T04:12:02.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 37 seconds!",
+      "timestamp": "2025-12-19T04:12:02.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 37 seconds!",
+      "timestamp": "2025-12-19T04:12:02.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 37 seconds!",
+      "timestamp": "2025-12-19T04:12:03.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 37 seconds!",
+      "timestamp": "2025-12-19T04:12:03.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 38 seconds!",
+      "timestamp": "2025-12-19T04:12:03.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 38 seconds!",
+      "timestamp": "2025-12-19T04:12:03.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 38 seconds!",
+      "timestamp": "2025-12-19T04:12:03.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 38 seconds!",
+      "timestamp": "2025-12-19T04:12:03.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 38 seconds!",
+      "timestamp": "2025-12-19T04:12:04.075766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 38 seconds!",
+      "timestamp": "2025-12-19T04:12:04.242433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 39 seconds!",
+      "timestamp": "2025-12-19T04:12:04.409100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 39 seconds!",
+      "timestamp": "2025-12-19T04:12:04.575766"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 39 seconds!",
+      "timestamp": "2025-12-19T04:12:04.742433"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 39 seconds!",
+      "timestamp": "2025-12-19T04:12:04.909100"
+    },
+    {
+      "type": "CRITICAL",
+      "message": "\u26a0\ufe0f STOVE has been ON for 39 seconds!",
+      "timestamp": "2025-12-19T04:12:05.075766"
+    }
+  ]
+}
