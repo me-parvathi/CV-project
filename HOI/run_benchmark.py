@@ -36,7 +36,7 @@ def main():
     print(f"\n{len(models)} model(s) ready for benchmarking")
     
     # Load dataset
-    dataset_path = "data/videos"  # Update this path to your UCF101 dataset
+    dataset_path = "/home/pb3071/videos/UCF-101"  # Update this path to your UCF101 dataset
     loader: DatasetLoader = UCF101Loader(dataset_path)
     videos = loader.load_videos()
     
@@ -61,10 +61,34 @@ def main():
     report = benchmark.generate_report()
     if len(report) > 0:
         print("\nBenchmark Summary:")
-        print(report.groupby('model').agg({
-            'inference_time': ['mean', 'std', 'min', 'max'],
-            'success': 'sum'
-        }).round(2))
+        
+        # Performance metrics
+        perf_metrics = ['inference_time', 'avg_confidence']
+        perf_cols = [col for col in perf_metrics if col in report.columns]
+        if perf_cols:
+            print("\nPerformance Metrics:")
+            agg_dict = {col: ['mean', 'std', 'min', 'max'] for col in perf_cols}
+            agg_dict['success'] = 'sum'
+            print(report.groupby('model').agg(agg_dict).round(2))
+        
+        # Memory metrics
+        mem_cols = [col for col in report.columns if 'memory' in col.lower()]
+        if mem_cols:
+            print("\nMemory Usage (MB):")
+            mem_agg = {col: ['mean', 'max'] for col in mem_cols}
+            print(report.groupby('model').agg(mem_agg).round(2))
+        
+        # Accuracy metrics (if ground truth available)
+        acc_cols = [col for col in report.columns if any(x in col.lower() for x in ['precision', 'recall', 'f1', 'correct'])]
+        if acc_cols:
+            print("\nAccuracy Metrics:")
+            acc_agg = {}
+            for col in acc_cols:
+                if 'correct' in col:
+                    acc_agg[col] = ['mean', 'sum']
+                else:
+                    acc_agg[col] = ['mean', 'std']
+            print(report.groupby('model').agg(acc_agg).round(3))
     else:
         print("No benchmark results to summarize.")
 

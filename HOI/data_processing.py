@@ -44,13 +44,18 @@ class UCF101Loader(DatasetLoader):
         
         for action_dir in self.dataset_path.iterdir():
             if action_dir.is_dir():
-                for video_file in action_dir.glob("*.mp4"):
+                for video_file in action_dir.glob("*.avi"):
                     if video_file.exists() and video_file.is_file():
-                        videos.append({
+                        video_dict = {
                             "video_path": str(video_file),
                             "action_class": action_dir.name,
                             "video_name": video_file.name
-                        })
+                        }
+                        # Add ground truth if action class is available
+                        video_dict["ground_truth"] = {
+                            "action": action_dir.name
+                        }
+                        videos.append(video_dict)
         
         return videos
 

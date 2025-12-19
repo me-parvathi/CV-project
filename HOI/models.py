@@ -35,6 +35,8 @@ class YOLOVideoMAEModel(HOIModel):
             from ultralytics import YOLO
             from transformers import VideoMAEImageProcessor, VideoMAEForVideoClassification
             
+            # Initialize YOLO - device will be specified during inference
+            # YOLO from ultralytics doesn't use .to(), but accepts device parameter in predict()
             self.yolo_model = YOLO('yolov8m.pt')
             self.videomae_processor = VideoMAEImageProcessor.from_pretrained(
                 "MCG-NJU/videomae-base-finetuned-kinetics"
@@ -83,7 +85,10 @@ class YOLOVideoMAEModel(HOIModel):
         
         # YOLO Object Detection
         middle_frame = frames[len(frames) // 2]
-        yolo_results = self.yolo_model(middle_frame, verbose=False)
+        # Explicitly specify device for YOLO inference
+        # YOLO accepts device as string ("cuda" or "cpu") or int (0 for GPU 0)
+        yolo_device = self.device if torch.cuda.is_available() and self.device == "cuda" else "cpu"
+        yolo_results = self.yolo_model(middle_frame, device=yolo_device, verbose=False)
         
         objects = []
         for result in yolo_results:
@@ -139,9 +144,8 @@ class LLaVAModel(HOIModel):
             self.model = LlavaNextForConditionalGeneration.from_pretrained(
                 model_id,
                 torch_dtype=torch.float16,
-                device_map="auto",
                 low_cpu_mem_usage=True
-            )
+            ).to(device)
             self.available = True
         except Exception as e:
             self.available = False
@@ -253,9 +257,8 @@ class Qwen2VLModel(HOIModel):
             model_id = "Qwen/Qwen2-VL-2B-Instruct"
             self.model = Qwen2VLForConditionalGeneration.from_pretrained(
                 model_id,
-                torch_dtype=torch.float16,
-                device_map="auto"
-            )
+                torch_dtype=torch.float16
+            ).to(device)
             self.processor = AutoProcessor.from_pretrained(model_id)
             self.available = True
         except Exception as e:
